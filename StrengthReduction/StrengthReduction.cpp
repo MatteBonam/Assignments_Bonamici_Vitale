@@ -12,7 +12,6 @@ namespace {
 
     bool instructionModified = false;
 
-    // Controlla se l'istruzione ha almeno due operandi
     if (I.getNumOperands() >= 2) {
         Value *Op0 = I.getOperand(0);
         Value *Op1 = I.getOperand(1);

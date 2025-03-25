@@ -1,5 +1,8 @@
+//opt/homebrew/Cellar/llvm/19.1.7_1/include
+
+
 compilare il passo:
-    clang++ -fPIC -shared -o build/AlgebraicIdentity.so AlgebraicIdentity.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core`
+    clang++ -fPIC -shared -o build/StrengthReduction.so AlgebraicIdentity.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core`
 
 convertire il file .ll in .bc:
     llvm-as test/test.ll -o test/test.bc
