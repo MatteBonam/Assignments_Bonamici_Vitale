@@ -1,0 +1,11 @@
+compilare il passo:
+    clang++ -fPIC -shared -o build/AlgebraicIdentity.so AlgebraicIdentity.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core`
+
+convertire il file .ll in .bc:
+    llvm-as test/test.ll -o test/test.bc
+
+applicare il pass e generare i file ottimizzati:
+    opt -load-pass-plugin=build/AlgebraicIdentity.so -passes="diobestia" test/test.bc -o build/output.optimized.bc
+
+Convertiamo poi il bitcode ottimizzato in .ll leggibile:
+    llvm-dis build/output.optimized.bc -o build/output.optimized.ll

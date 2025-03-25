@@ -1,6 +1,6 @@
 //=============================================================================
 // FILE:
-//    TestPass.cpp
+//    AlgebraicIdentity.cpp
 //
 // DESCRIPTION:
 //    Visits all functions in a module and prints their names. Strictly speaking, 
