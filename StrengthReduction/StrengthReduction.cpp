@@ -1,21 +1,3 @@
-//=============================================================================
-// FILE:
-//    TestPass.cpp
-//
-// DESCRIPTION:
-//    Visits all functions in a module and prints their names. Strictly speaking, 
-//    this is an analysis pass (i.e. //    the functions are not modified). However, 
-//    in order to keep things simple there's no 'print' method here (every analysis 
-//    pass should implement it).
-//
-// USAGE:
-//    New PM
-//      opt -load-pass-plugin=<path-to>libTestPass.so -passes="test-pass" `\`
-//        -disable-output <input-llvm-file>
-//
-//
-// License: MIT
-//=============================================================================
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
@@ -23,128 +5,101 @@
 
 using namespace llvm;
 
-//-----------------------------------------------------------------------------
-// TestPass implementation
-//-----------------------------------------------------------------------------
-// No need to expose the internals of the pass to the outside world - keep
-// everything in an anonymous namespace.
 namespace {
 
-bool runOnInstruction(Instruction &I) {
-    outs() << "SONO: " << I.getOpcodeName() << "\n";
-    // Stampa la prima istruzione come operando
-    outs() << "COME OPERANDO: ";
-    I.printAsOperand(outs(), false);
-    outs() << "\n";
+  bool runOnInstruction(Instruction &I) {
+    outs() << "ISTRUZIONE: " << I << "\n";
 
-    // User-->Use-->Value
-    outs() << "I MIEI OPERANDI SONO:\n";
-    for (auto *Iter = I.op_begin(); Iter != I.op_end(); ++Iter) {
-      Value *Operand = *Iter;
+    bool instructionModified = false;
 
-      if (Argument *Arg = dyn_cast<Argument>(Operand)) {
-        outs() << "\t" << *Arg << ": SONO L'ARGOMENTO N. " << Arg->getArgNo() 
-	       <<" DELLA FUNZIONE " << Arg->getParent()->getName()
-               << "\n";
-      }
-      else if (ConstantInt *C = dyn_cast<ConstantInt>(Operand)) {
-        outs() << "\t" << *C << ": SONO UNA COSTANTE INTERA DI VALORE " << C->getValue()
-               << "\n";
-      }
-      else {
-        outs() << "\t" << *Operand << ": SONO UN OPERANDO GENERICO"
-               << "\n";
-      }
-    }
+    // Controlla se l'istruzione ha almeno due operandi
+    if (I.getNumOperands() >= 2) {
+        Value *Op0 = I.getOperand(0);
+        Value *Op1 = I.getOperand(1);
 
-    outs() << "LA LISTA DEI MIEI USERS:\n";
-    for (auto Iter = I.user_begin(); Iter != I.user_end(); ++Iter) {
-      outs() << "\t" << *(dyn_cast<Instruction>(*Iter)) << "\n";
-    }
-
-    outs() << "E DEI MIEI USI (CHE E' LA STESSA):\n";
-    for (auto Iter = I.use_begin(); Iter != I.use_end(); ++Iter) {
-      outs() << "\t" << *(dyn_cast<Instruction>(Iter->getUser())) << "\n";
-    }
-
-    if (I.getOpcode() == Instruction::Mul)
-    {
-      outs() << "SONO UNA " << I.getOpcodeName() << " ED HO COME PARAMETRI " << I.getOperand(0) << " E " << I.getOperand(1) << "\n";
-      if (ConstantInt *Con = dyn_cast<ConstantInt>(I.getOperand(1)))
-      {
-        outs() << "SONO IL SECONDO PARAMETRO E SONO UNA COSTANTE DI VALORE: " << *Con << "\n";
-        if (*Con){
-          Value* newValue = new Value();
-        Instruction *NewInst = BinaryOperator::Create(
-          Instruction::Shl, I.getOperand(0), newValue);
+        if (I.getOpcode() == Instruction::Mul) {
+            if (ConstantInt *C = dyn_cast<ConstantInt>(Op0)) {
+                if (C->getSExtValue() == 15) {
+                    outs() << "MULT PER 15 RILEVATA, SOSTITUISCO "
+                           << I << " CON SHIFT DI 4 " << *Op1 << "\n";
+                    Value *shiftedOp0 = BinaryOperator::CreateShl(Op0, ConstantInt::get(Op0->getType(), 4), "", &I);
+                    Value *result = BinaryOperator::CreateSub(shiftedOp0, Op0, "", &I);
+                    I.replaceAllUsesWith(result);
+                    instructionModified = true;
+                }
+            } else if (ConstantInt *C = dyn_cast<ConstantInt>(Op1)) {
+                if (C->getSExtValue() == 15) {
+                    outs() << "MULT PER 15 RILEVATA, SOSTITUISCO "
+                           << I << " CON SHIFT LEFT DI 4 " << *Op1 << "\n";
+                    Value *shiftedOp1 = BinaryOperator::CreateShl(Op1, ConstantInt::get(Op1->getType(), 4), "", &I);
+                    Value *result = BinaryOperator::CreateSub(shiftedOp1, Op1, "", &I);
+                    I.replaceAllUsesWith(result);
+                    instructionModified = true;
+                }
+            }
+        } else if (I.getOpcode() == Instruction::SDiv) {
+            if (ConstantInt *C = dyn_cast<ConstantInt>(Op1)) {
+                if (C->getSExtValue() == 8) {
+                    outs() << "DIV PER 8 RILEVATA, SOSTITUISCO "
+                           << I << " CON SHIFT RIGHT DI 3 " << *Op0 << "\n";
+                    Value *result = BinaryOperator::CreateLShr(Op0, ConstantInt::get(Op1->getType(), 3), "", &I);
+                    I.replaceAllUsesWith(result);
+                    instructionModified = true;
+                }
+            }
         }
-      }
-      else
-      {
-        outs() << "";
-      }
     }
-    //   Manipolazione delle istruzioni
-    //Instruction *NewInst = BinaryOperator::Create(
-    //    Instruction::Add, Inst1st.getOperand(0), Inst1st.getOperand(0));
 
-    //NewInst->insertAfter(&Inst1st);
-    // Si possono aggiornare le singole references separatamente?
-    // Controlla la documentazione e prova a rispondere.
-    //Inst1st.replaceAllUsesWith(NewInst);
-    return true;
+    return instructionModified;
 }
+
 
 bool runOnBasicBlock(BasicBlock &B) {
+    outs() << "CURR BLOCK: " << B.getName() << "\n";
+    bool blockModified = false;
     
-    // Preleviamo le prime due istruzioni del BB
+    std::vector<Instruction*> instructionsToErase;
     for (auto Iter = B.begin(); Iter != B.end(); ++Iter) {
-    if (runOnInstruction(*Iter)) {
-      }
+        if (runOnInstruction(*Iter)) {
+            instructionsToErase.push_back(&*Iter);
+            blockModified = true;
+        }
     }
-    // L'indirizzo della prima istruzione deve essere uguale a quello del 
-    // primo operando della seconda istruzione (per costruzione dell'esempio)
-
-    
-    return true;
-  }
-
-
-
-// New PM implementation
-struct TestPass: PassInfoMixin<TestPass> {
-  // Main entry point, takes IR unit to run the pass on (&F) and the
-  // corresponding pass manager (to be queried if need be)
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
-
-    bool Transformed = false;
-  	for (auto Iter = F.begin(); Iter != F.end(); ++Iter) {
-    if (runOnBasicBlock(*Iter)) {
-      Transformed = true;
-      }
+    for (auto *I : instructionsToErase) {
+        I->eraseFromParent();
     }
-    errs() << Transformed << "\n";
-  	return PreservedAnalyses::all();
+
+    return blockModified;
 }
 
+struct TestPass: PassInfoMixin<TestPass> {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
+    outs() << "CURR FUNCTION: " << F.getName() << "\n";
+    
+    bool functionModified = false;
+    for (auto Iter = F.begin(); Iter != F.end(); ++Iter) {
+        if (runOnBasicBlock(*Iter)) {
+            functionModified = true;
+        }
+    }
+    
+    outs() << "STATO FUNZIONE: " 
+           << (functionModified ? "MODIFICATA" : "UGUALE") << "\n\n\n";
+  	
+    return PreservedAnalyses::all();
+}
 
-  // Without isRequired returning true, this pass will be skipped for functions
-  // decorated with the optnone LLVM attribute. Note that clang -O0 decorates
-  // all functions with optnone.
   static bool isRequired() { return true; }
 };
-} // namespace
+} 
 
-//-----------------------------------------------------------------------------
-// New PM Registration
-//-----------------------------------------------------------------------------
 llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
   return {LLVM_PLUGIN_API_VERSION, "TestPass", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "my-test-pass") {
+                  if (Name == "diobestia") {
                     FPM.addPass(TestPass());
                     return true;
                   }
@@ -153,9 +108,6 @@ llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
           }};
 }
 
-// This is the core interface for pass plugins. It guarantees that 'opt' will
-// be able to recognize TestPass when added to the pass pipeline on the
-// command line, i.e. via '-passes=test-pass'
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
   return getTestPassPluginInfo();
