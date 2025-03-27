@@ -126,7 +126,7 @@ llvm::PassPluginLibraryInfo getAlgebraicIdentityPluginInfo() {
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                   if (Name == "AlgebraicIdentity") {
-                    FPM.addPass(TestPass());
+                    FPM.addPass(AlgebraicIdentity());
                     return true;
                   }
                   return false;
@@ -139,5 +139,5 @@ llvm::PassPluginLibraryInfo getAlgebraicIdentityPluginInfo() {
 // command line, i.e. via '-passes=test-pass'
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
-  return getTestPassPluginInfo();
+  return getAlgebraicIdentityPluginInfo();
 }
