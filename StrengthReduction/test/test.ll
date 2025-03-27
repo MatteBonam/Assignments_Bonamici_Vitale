@@ -6,7 +6,7 @@ entry:
 
 define i32 @multiply_by_15_v2(i32 %x) {
 entry:
-  %mul = mul i32 %x, 15
+  %mul = mul i32 15, %x
   ret i32 %mul
 }
 
