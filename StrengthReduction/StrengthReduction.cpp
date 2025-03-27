@@ -11,7 +11,7 @@ namespace {
     //calcolo il log del valore e 2^ris
     int p = log2(constantValue);
     int nearestPowerOf2 = 1 << p; //him
-    // differenza (nel nostro esempio -> 64-15)
+    // differenza (nel nostro esempio -> 48 = 64-16)
     int diff = constantValue - nearestPowerOf2;
 
     if ((constantValue & (constantValue - 1)) == 0) {
@@ -30,24 +30,26 @@ namespace {
             Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP", &I);
             Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ", &I);
             Instruction *add = BinaryOperator::CreateAdd(shiftP, shiftQ, "add", &I);
-            I.replaceAllUsesWith(add);
+            I.replaceAllUsesWith(add);        
         } else {
-            // tipo 48 (log2(48) = 5.5) ==> 64 - 16
+            // tipo 48 (log2(48) = 5.5) ==> 64 - 16 ==> (2 << 6) - (2 << 4)
             // (operand << p) - (operand << q)
             Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP", &I);
             Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ", &I);
             Instruction *sub = BinaryOperator::CreateSub(shiftP, shiftQ, "sub", &I);
             I.replaceAllUsesWith(sub); 
-            
         }
         //I.eraseFromParent();
         return true;
     }
+
+    //se la diff non e' multiplo di 2 allora niente opt
     return false; 
   }
   bool runOnInstruction(Instruction &I) {
     outs() << "ISTRUZIONE: " << I << "\n";
 
+    //importante return faila
     if (I.getNumOperands() < 2) return false;
 
     Value *Op0 = I.getOperand(0);
@@ -59,11 +61,13 @@ namespace {
             int constantValue = C->getSExtValue();
             if (optimizeWithShiftAddSub(Op1, constantValue, I)) {
                 outs() << "MULT PER " << constantValue << " OTTIMIZZATA\n";
+                I.eraseFromParent(); // 
             }
         } else if (ConstantInt *C = dyn_cast<ConstantInt>(Op1)) {
             int constantValue = C->getSExtValue();
             if (optimizeWithShiftAddSub(Op0, constantValue, I)) {
                 outs() << "MULT PER " << constantValue << " OTTIMIZZATA \n";
+                I.eraseFromParent(); // 
             }
         }
     }
@@ -72,15 +76,18 @@ namespace {
 
 
 bool runOnBasicBlock(BasicBlock &B) {
-    
+    std::vector<Instruction*> instructionsToRemove;
     // Preleviamo le prime due istruzioni del BB
-    for (auto Iter = B.begin(); Iter != B.end(); ++Iter) {
-    if (runOnInstruction(*Iter)) {
-      }
+    for (auto &I : B) {
+        if (runOnInstruction(I)) {
+            instructionsToRemove.push_back(&I);
+        }
     }
     // L'indirizzo della prima istruzione deve essere uguale a quello del 
     // primo operando della seconda istruzione (per costruzione dell'esempio)
-
+    for (auto *I : instructionsToRemove) {
+        I->eraseFromParent(); 
+    }
     
     return true;
   }
