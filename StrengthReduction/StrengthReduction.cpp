@@ -32,7 +32,7 @@ namespace {
             Instruction *add = BinaryOperator::CreateAdd(shiftP, shiftQ, "add", &I);
             I.replaceAllUsesWith(add);
         } else {
-            // tipo 48 (log2(48) = 5.5) ==> 64 - 16
+            // tipo 48 (log2(48) = 5.5) ==> 64 - 48
             // (operand << p) - (operand << q)
             Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP", &I);
             Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ", &I);
