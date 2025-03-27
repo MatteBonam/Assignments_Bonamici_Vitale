@@ -88,17 +88,15 @@ bool runOnBasicBlock(BasicBlock &B) {
 struct StrengthReduction: PassInfoMixin<StrengthReduction> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
     outs() << "CURR FUNCTION: " << F.getName() << "\n";
+    bool Transformed = false;
     
-    bool functionModified = false;
     for (auto Iter = F.begin(); Iter != F.end(); ++Iter) {
         if (runOnBasicBlock(*Iter)) {
-            functionModified = true;
+          Transformed = true;
         }
     }
-    
-    outs() << "STATO FUNZIONE: " 
-           << (functionModified ? "MODIFICATA" : "UGUALE") << "\n\n\n";
-  	
+    errs() << Transformed << "\n";
+
     return PreservedAnalyses::all();
 }
 
