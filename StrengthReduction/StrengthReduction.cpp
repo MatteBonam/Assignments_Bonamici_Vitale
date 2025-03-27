@@ -6,72 +6,86 @@
 using namespace llvm;
 
 namespace {
+  bool optimizeWithShiftAddSub(Value *operand, int constantValue, Instruction &I) {
+    //se fosse 
+    //calcolo il log del valore e 2^ris
+    int p = log2(constantValue);
+    int nearestPowerOf2 = 1 << p; //him
+    // differenza (nel nostro esempio -> 64-15)
+    int diff = constantValue - nearestPowerOf2;
 
+    if ((constantValue & (constantValue - 1)) == 0) {
+        Instruction *newInstr = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftLeft", &I);
+        I.replaceAllUsesWith(newInstr);  
+        I.eraseFromParent();            
+        return true;
+    }
+
+    if (diff != 0 && (diff & (diff - 1)) == 0) { 
+         int q = log2(abs(diff));
+
+         if (diff > 0) {
+            // tipo 10 = 8 + 2 sostituisco [(operand << p) + (operand << q)]
+            // ==> operand << (2^)3 + operand << (2^)1
+            Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP", &I);
+            Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ", &I);
+            Instruction *add = BinaryOperator::CreateAdd(shiftP, shiftQ, "add", &I);
+            I.replaceAllUsesWith(add);
+        } else {
+            // tipo 48 (log2(48) = 5.5) ==> 64 - 16
+            // (operand << p) - (operand << q)
+            Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP", &I);
+            Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ", &I);
+            Instruction *sub = BinaryOperator::CreateSub(shiftP, shiftQ, "sub", &I);
+            I.replaceAllUsesWith(sub); 
+            
+        }
+        //I.eraseFromParent();
+        return true;
+    }
+    return false; 
+  }
   bool runOnInstruction(Instruction &I) {
     outs() << "ISTRUZIONE: " << I << "\n";
 
-    bool instructionModified = false;
+    if (I.getNumOperands() < 2) return false;
 
-    if (I.getNumOperands() >= 2) {
-        Value *Op0 = I.getOperand(0);
-        Value *Op1 = I.getOperand(1);
+    Value *Op0 = I.getOperand(0);
+    Value *Op1 = I.getOperand(1);
 
-        if (I.getOpcode() == Instruction::Mul) {
-            if (ConstantInt *C = dyn_cast<ConstantInt>(Op0)) {
-                if (C->getSExtValue() == 15) {
-                    outs() << "MULT PER 15 RILEVATA, SOSTITUISCO "
-                           << I << " CON SHIFT DI 4 " << *Op1 << "\n";
-                    Value *shiftedOp0 = BinaryOperator::CreateShl(Op0, ConstantInt::get(Op0->getType(), 4), "", &I);
-                    Value *result = BinaryOperator::CreateSub(shiftedOp0, Op0, "", &I);
-                    I.replaceAllUsesWith(result);
-                    instructionModified = true;
-                }
-            } else if (ConstantInt *C = dyn_cast<ConstantInt>(Op1)) {
-                if (C->getSExtValue() == 15) {
-                    outs() << "MULT PER 15 RILEVATA, SOSTITUISCO "
-                           << I << " CON SHIFT LEFT DI 4 " << *Op1 << "\n";
-                    Value *shiftedOp1 = BinaryOperator::CreateShl(Op1, ConstantInt::get(Op1->getType(), 4), "", &I);
-                    Value *result = BinaryOperator::CreateSub(shiftedOp1, Op1, "", &I);
-                    I.replaceAllUsesWith(result);
-                    instructionModified = true;
-                }
+
+    if (I.getOpcode() == Instruction::Mul) {
+        if (ConstantInt *C = dyn_cast<ConstantInt>(Op0)) {
+            int constantValue = C->getSExtValue();
+            if (optimizeWithShiftAddSub(Op1, constantValue, I)) {
+                outs() << "MULT PER " << constantValue << " OTTIMIZZATA\n";
             }
-        } else if (I.getOpcode() == Instruction::SDiv) {
-            if (ConstantInt *C = dyn_cast<ConstantInt>(Op1)) {
-                if (C->getSExtValue() == 8) {
-                    outs() << "DIV PER 8 RILEVATA, SOSTITUISCO "
-                           << I << " CON SHIFT RIGHT DI 3 " << *Op0 << "\n";
-                    Value *result = BinaryOperator::CreateLShr(Op0, ConstantInt::get(Op1->getType(), 3), "", &I);
-                    I.replaceAllUsesWith(result);
-                    instructionModified = true;
-                }
+        } else if (ConstantInt *C = dyn_cast<ConstantInt>(Op1)) {
+            int constantValue = C->getSExtValue();
+            if (optimizeWithShiftAddSub(Op0, constantValue, I)) {
+                outs() << "MULT PER " << constantValue << " OTTIMIZZATA \n";
             }
         }
     }
-
-    return instructionModified;
+    return true;
 }
 
 
 bool runOnBasicBlock(BasicBlock &B) {
-    outs() << "CURR BLOCK: " << B.getName() << "\n";
-    bool blockModified = false;
     
-    std::vector<Instruction*> instructionsToErase;
+    // Preleviamo le prime due istruzioni del BB
     for (auto Iter = B.begin(); Iter != B.end(); ++Iter) {
-        if (runOnInstruction(*Iter)) {
-            instructionsToErase.push_back(&*Iter);
-            blockModified = true;
-        }
+    if (runOnInstruction(*Iter)) {
+      }
     }
-    for (auto *I : instructionsToErase) {
-        I->eraseFromParent();
-    }
+    // L'indirizzo della prima istruzione deve essere uguale a quello del 
+    // primo operando della seconda istruzione (per costruzione dell'esempio)
 
-    return blockModified;
-}
+    
+    return true;
+  }
 
-struct TestPass: PassInfoMixin<TestPass> {
+struct StrengthReduction: PassInfoMixin<StrengthReduction> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
     outs() << "CURR FUNCTION: " << F.getName() << "\n";
     
@@ -92,14 +106,14 @@ struct TestPass: PassInfoMixin<TestPass> {
 };
 } 
 
-llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
-  return {LLVM_PLUGIN_API_VERSION, "TestPass", LLVM_VERSION_STRING,
+llvm::PassPluginLibraryInfo getStrengthReductionPluginInfo() {
+  return {LLVM_PLUGIN_API_VERSION, "StrengthReduction", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "diobestia") {
-                    FPM.addPass(TestPass());
+                  if (Name == "StrengthReduction") {
+                    FPM.addPass(StrengthReduction());
                     return true;
                   }
                   return false;
@@ -109,5 +123,5 @@ llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
 
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
-  return getTestPassPluginInfo();
+  return getStrengthReductionPluginInfo();
 }
