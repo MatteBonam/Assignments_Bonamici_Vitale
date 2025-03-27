@@ -93,7 +93,7 @@ bool runOnBasicBlock(BasicBlock &B) {
 
 
 // New PM implementation
-struct TestPass: PassInfoMixin<TestPass> {
+struct AlgebraicIdentity: PassInfoMixin<AlgebraicIdentity> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding pass manager (to be queried if need be)
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
@@ -119,7 +119,7 @@ struct TestPass: PassInfoMixin<TestPass> {
 //-----------------------------------------------------------------------------
 // New PM Registration
 //-----------------------------------------------------------------------------
-llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
+llvm::PassPluginLibraryInfo getAlgebraicIdentityPluginInfo() {
   return {LLVM_PLUGIN_API_VERSION, "AlgebraicIdentity", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
             PB.registerPipelineParsingCallback(
