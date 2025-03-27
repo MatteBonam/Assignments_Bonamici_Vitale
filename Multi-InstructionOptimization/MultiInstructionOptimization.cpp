@@ -1,6 +1,6 @@
 //=============================================================================
 // FILE:
-//    TestPass.cpp
+//    MultiInstructionOptimization.cpp
 //
 // DESCRIPTION:
 //    Visits all functions in a module and prints their names. Strictly speaking, 
@@ -30,89 +30,151 @@ using namespace llvm;
 // everything in an anonymous namespace.
 namespace {
 
-bool runOnInstruction(Instruction &I) {
-    outs() << "SONO: " << I.getOpcodeName() << "\n";
-    // Stampa la prima istruzione come operando
-    outs() << "COME OPERANDO: ";
-    I.printAsOperand(outs(), false);
-    outs() << "\n";
-
-    // User-->Use-->Value
-    outs() << "I MIEI OPERANDI SONO:\n";
-    for (auto *Iter = I.op_begin(); Iter != I.op_end(); ++Iter) {
-      Value *Operand = *Iter;
-
-      if (Argument *Arg = dyn_cast<Argument>(Operand)) {
-        outs() << "\t" << *Arg << ": SONO L'ARGOMENTO N. " << Arg->getArgNo() 
-	       <<" DELLA FUNZIONE " << Arg->getParent()->getName()
-               << "\n";
-      }
-      else if (ConstantInt *C = dyn_cast<ConstantInt>(Operand)) {
-        outs() << "\t" << *C << ": SONO UNA COSTANTE INTERA DI VALORE " << C->getValue()
-               << "\n";
-      }
-      else {
-        outs() << "\t" << *Operand << ": SONO UN OPERANDO GENERICO"
-               << "\n";
-      }
-    }
-
-    outs() << "LA LISTA DEI MIEI USERS:\n";
-    for (auto Iter = I.user_begin(); Iter != I.user_end(); ++Iter) {
-      outs() << "\t" << *(dyn_cast<Instruction>(*Iter)) << "\n";
-    }
-
-    outs() << "E DEI MIEI USI (CHE E' LA STESSA):\n";
-    for (auto Iter = I.use_begin(); Iter != I.use_end(); ++Iter) {
-      outs() << "\t" << *(dyn_cast<Instruction>(Iter->getUser())) << "\n";
-    }
-
-    if (I.getOpcode() == Instruction::Mul)
+void runOnBinaryOperator(BinaryOperator *BO1, BinaryOperator *BO2)
+{
+  //estraggo gli operandi
+  Value *Op1 = BO1->getOperand(0);
+  Value *Op2 = BO1->getOperand(1);
+  Value *IOp1 = BO2->getOperand(0);
+  Value *IOp2 = BO2->getOperand(1);
+  //se la mia istruzione e' una add, cerco una sub con un operando uguale ad uno dei miei operandi, 
+  //essendo che uno degli operandi sono io, solo uno dei 2 puo' essere uguale ad uno dei miei operandi
+  if (BO1->getOpcode() == Instruction::Add && BO2->getOpcode() == Instruction::Sub)
+  {
+    outs() << "Sono: "  << *BO2 << " con operandi: " << *IOp1 << ' ' << *IOp2 << "\n";
+    if (ConstantInt *IC1 = dyn_cast<ConstantInt>(IOp1))
     {
-      outs() << "SONO UNA " << I.getOpcodeName() << " ED HO COME PARAMETRI " << I.getOperand(0) << " E " << I.getOperand(1) << "\n";
-      if (ConstantInt *Con = dyn_cast<ConstantInt>(I.getOperand(1)))
+      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
       {
-        outs() << "SONO IL SECONDO PARAMETRO E SONO UNA COSTANTE DI VALORE: " << *Con << "\n";
-        if (*Con){
-          Value* newValue = new Value();
-        Instruction *NewInst = BinaryOperator::Create(
-          Instruction::Shl, I.getOperand(0), newValue);
+        if (IC1->getValue() - C1->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op2 << "\n";
+          BO2->replaceAllUsesWith(Op2);
+        }
+      }else
+      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
+      {
+        if (IC1->getValue() - C2->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op1 << "\n";
+          BO2->replaceAllUsesWith(Op1);
         }
       }
-      else
+    }
+    if(ConstantInt *IC2 = dyn_cast<ConstantInt>(IOp2))
+    {
+      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
       {
-        outs() << "";
+        if (IC2->getValue() - C1->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op2 << "\n";
+          BO2->replaceAllUsesWith(Op2);
+        }
+      }else
+      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
+      {
+        if (IC2->getValue() - C2->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op1 << "\n";
+          BO2->replaceAllUsesWith(Op1);
+        }
       }
     }
-    //   Manipolazione delle istruzioni
-    //Instruction *NewInst = BinaryOperator::Create(
-    //    Instruction::Add, Inst1st.getOperand(0), Inst1st.getOperand(0));
-
-    //NewInst->insertAfter(&Inst1st);
-    // Si possono aggiornare le singole references separatamente?
-    // Controlla la documentazione e prova a rispondere.
-    //Inst1st.replaceAllUsesWith(NewInst);
-    return true;
+  }
+  //se la mia istruzione e' una add, cerco una add con un operando uguale al negativo di uno dei miei operandi, 
+  //essendo che uno degli operandi sono io, solo uno dei 2 puo' essere uguale al negativo di uno dei miei operandi
+  if (BO1->getOpcode() == Instruction::Add && BO2->getOpcode() == Instruction::Add)
+  {
+    outs() << "Sono: "  << *BO2 << " con operandi: " << *IOp1 << ' ' << *IOp2 << "\n";
+    if (ConstantInt *IC1 = dyn_cast<ConstantInt>(IOp1))
+    {
+      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
+      {
+        if (IC1->getValue() + C1->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op2 << "\n";
+          BO2->replaceAllUsesWith(Op2);
+        }
+      }else
+      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
+      {
+        if (IC1->getValue() + C2->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op1 << "\n";
+          BO2->replaceAllUsesWith(Op1);
+        }
+      }
+    }
+    if(ConstantInt *IC2 = dyn_cast<ConstantInt>(IOp2))
+    {
+      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
+      {
+        if (IC2->getValue() + C1->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op2 << "\n";
+          BO2->replaceAllUsesWith(Op2);
+        }
+      }else
+      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
+      {
+        if (IC2->getValue() + C2->getValue() == 0)
+        {
+          outs() << "Rimpiazzato con: " << *Op1 << "\n";
+          BO2->replaceAllUsesWith(Op1);
+        }
+      }
+    }
+  }
+  //se la mia istruzione e' una mul, cerco una div con un operando uguale a uno dei miei operandi,
+  //e nella seconda posizione, per assicurarmi che il prodotto sia diviso per lo stesso numero della moltiplicazione
+  if (BO1->getOpcode() == Instruction::Mul && BO2->getOpcode() == Instruction::SDiv)
+  {
+    outs() << "Sono: "  << *BO2 << " con operandi: " << *IOp1 << ' ' << *IOp2 << "\n";
+    if (ConstantInt *IC2 = dyn_cast<ConstantInt>(IOp2))
+    {
+      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
+      {
+        if (IC2->getValue() == C1->getValue())
+        {
+          outs() << "Rimpiazzato con: " << *Op2 << "\n";
+          BO2->replaceAllUsesWith(Op2);
+        }
+      }else
+      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
+      {
+        if (IC2->getValue() == C2->getValue())
+        {
+          outs() << "Rimpiazzato con: " << *Op1 << "\n";
+          BO2->replaceAllUsesWith(Op1);
+        }
+      }
+    }
+  }
 }
 
 bool runOnBasicBlock(BasicBlock &B) {
-    
+
     // Preleviamo le prime due istruzioni del BB
     for (auto Iter = B.begin(); Iter != B.end(); ++Iter) {
-    if (runOnInstruction(*Iter)) {
+      // Controllo che sia un' operazione binaria
+      if (BinaryOperator *BI = dyn_cast<BinaryOperator>(Iter)) {
+        for (auto Ite = BI->use_begin(); Ite != BI->use_end(); ++Ite) {
+          //controllo tutti gli usi dell'espressione
+            if(BinaryOperator *I = dyn_cast<BinaryOperator>(Ite->getUser()))
+            {
+              runOnBinaryOperator(BI, I);
+              outs() << "Io sono: " << *I << "\n";
+            }
+          }
+        }
       }
-    }
-    // L'indirizzo della prima istruzione deve essere uguale a quello del 
-    // primo operando della seconda istruzione (per costruzione dell'esempio)
-
-    
     return true;
   }
 
 
 
 // New PM implementation
-struct TestPass: PassInfoMixin<TestPass> {
+struct MultiInstructionOptimization: PassInfoMixin<MultiInstructionOptimization> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding pass manager (to be queried if need be)
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
@@ -138,14 +200,14 @@ struct TestPass: PassInfoMixin<TestPass> {
 //-----------------------------------------------------------------------------
 // New PM Registration
 //-----------------------------------------------------------------------------
-llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
-  return {LLVM_PLUGIN_API_VERSION, "TestPass", LLVM_VERSION_STRING,
+llvm::PassPluginLibraryInfo getMultiInstructionOptimizationPluginInfo() {
+  return {LLVM_PLUGIN_API_VERSION, "MultiInstructionOptimization", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "my-test-pass") {
-                    FPM.addPass(TestPass());
+                  if (Name == "m-i-o") {
+                    FPM.addPass(MultiInstructionOptimization());
                     return true;
                   }
                   return false;
@@ -158,5 +220,5 @@ llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
 // command line, i.e. via '-passes=test-pass'
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
-  return getTestPassPluginInfo();
+  return getMultiInstructionOptimizationPluginInfo();
 }

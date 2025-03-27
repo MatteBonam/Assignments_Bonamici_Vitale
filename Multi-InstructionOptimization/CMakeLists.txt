@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(test-pass)
+project(m-i-o)
 
 #===============================================================================
 # 1. LOAD LLVM CONFIGURATION
@@ -37,5 +37,5 @@ add_library(MultiInstructionOptimization SHARED MultiInstructionOptimization.cpp
 
 # Allow undefined symbols in shared objects on Darwin (this is the default
 # behaviour on Linux)
-target_link_libraries(TestPass
+target_link_libraries(MultiInstructionOptimization
   "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")
