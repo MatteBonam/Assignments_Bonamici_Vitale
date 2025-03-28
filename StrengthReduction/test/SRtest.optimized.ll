@@ -15,10 +15,24 @@ define i32 @strength_red(i32 noundef %0) #0 {
   %shiftP1 = shl i32 %0, 3
   %add = add i32 %shiftP1, %shiftQ
   %5 = mul nsw i32 %0, 47
-  %6 = add nsw i32 %shiftLeft, %sub
-  %7 = add nsw i32 %add, %5
-  %8 = add nsw i32 %6, %7
-  ret i32 %8
+  %6 = sdiv i32 %0, 16
+  %shiftRight = lshr i32 %0, 4
+  %7 = sdiv i32 %0, 15
+  %shiftP2 = lshr i32 %0, 4
+  %add3 = add i32 %shiftP2, %0
+  %8 = sdiv i32 %0, 10
+  %shiftQ5 = lshr i32 %0, 1
+  %shiftP4 = lshr i32 %0, 3
+  %sub6 = sub i32 %shiftP4, %shiftQ5
+  %9 = sdiv i32 %0, 47
+  %10 = add nsw i32 %shiftLeft, %sub
+  %11 = add nsw i32 %10, %add
+  %12 = add nsw i32 %11, %5
+  %13 = add nsw i32 %shiftRight, %add3
+  %14 = add nsw i32 %13, %sub6
+  %15 = add nsw i32 %14, %9
+  %16 = add nsw i32 %12, %15
+  ret i32 %16
 }
 
 attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="apple-m1" "target-features"="+aes,+altnzcv,+ccdp,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+fp16fml,+fptoint,+fullfp16,+jsconv,+lse,+neon,+pauth,+perfmon,+predres,+ras,+rcpc,+rdm,+sb,+sha2,+sha3,+specrestrict,+ssbs,+v8.1a,+v8.2a,+v8.3a,+v8.4a,+v8a,+zcm,+zcz" }

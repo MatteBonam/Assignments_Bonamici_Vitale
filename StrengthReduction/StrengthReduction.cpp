@@ -20,7 +20,7 @@ namespace {
   }
 
 
-  bool optimizeWithShiftAddSub(Value *operand, int constantValue, Instruction &I) {
+  bool optimizeMulWithShiftAddSub(Value *operand, int constantValue, Instruction &I) {
     //se gia potenza di 2..
     outs() << "RUNNO OPT CON CV --> " << constantValue << "\n";
     
@@ -38,7 +38,6 @@ namespace {
     
     if (diff != 0 && (abs(diff) & (abs(diff) - 1)) == 0) { 
         int q = log2(abs(diff));
-        //calcolo il log del valore e 2^ris
     
     if (diff > 0) {
       // tipo 48 (log2(48) = 5.5 -> 6) ==> 64 - 16
@@ -83,6 +82,59 @@ namespace {
     return false; 
   }
 
+  bool optimizeDivWithShiftAddSub(Value *operand, int constantValue, Instruction &I) {
+    outs() << "RUNNO DIV OPT CON CV --> " << constantValue << "\n";
+    
+    int p = std::round(log2(constantValue));
+    int nearestPowerOf2 = nearestPowerOfTwo(constantValue);
+    int diff = constantValue - nearestPowerOf2;
+
+    // Se il valore è una potenza di 2, effettuiamo solo lo shift a destra
+    if ((constantValue & (constantValue - 1)) == 0) {
+        Instruction *newInstr = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), p), "shiftRight");
+        newInstr->insertAfter(&I);   
+        I.replaceAllUsesWith(newInstr);        
+        return true;
+    }
+
+    if (diff != 0 && (abs(diff) & (abs(diff) - 1)) == 0) {
+        int q = log2(abs(diff));
+
+        if (diff > 0) {
+            Instruction *sub;
+            Instruction *shiftP = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), p), "shiftP");
+            shiftP->insertAfter(&I);      
+
+            if (q != 0) {
+                Instruction *shiftQ = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), q), "shiftQ");
+                sub = BinaryOperator::CreateSub(shiftP, shiftQ, "sub");
+                shiftQ->insertAfter(&I);
+            } else {
+                sub = BinaryOperator::CreateSub(shiftP, operand, "sub");
+            }
+            sub->insertAfter(shiftP);
+            I.replaceAllUsesWith(sub);
+        } else {
+            Instruction *add;
+            Instruction *shiftP = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), p), "shiftP");
+            shiftP->insertAfter(&I);      
+
+            if (q != 0) {
+                Instruction *shiftQ = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), q), "shiftQ");
+                add = BinaryOperator::CreateAdd(shiftP, shiftQ, "add");
+                shiftQ->insertAfter(&I);
+            } else {
+                add = BinaryOperator::CreateAdd(shiftP, operand, "add");
+            }
+            add->insertAfter(shiftP);
+            I.replaceAllUsesWith(add);
+        }
+
+        return true;
+    }
+      return false;
+    }
+
   bool runOnInstruction(Instruction &I) {
     outs() << "ISTRUZIONE: " << I << "\n";
 
@@ -101,30 +153,35 @@ namespace {
           int constantValue1 = C1->getSExtValue();
   
           if (isCloserToPowerOfTwo(constantValue0, constantValue1)) {
-              if (optimizeWithShiftAddSub(Op1, constantValue0, I)) {
+              if (optimizeMulWithShiftAddSub(Op1, constantValue0, I)) {
                   outs() << "MULT PER " << constantValue0 << " OTTIMIZZATA\n";
               }
           } else {
-              if (optimizeWithShiftAddSub(Op0, constantValue1, I)) {
+              if (optimizeMulWithShiftAddSub(Op0, constantValue1, I)) {
                   outs() << "MULT PER " << constantValue1 << " OTTIMIZZATA\n";
               }
           }
       } else if (C0) {
           int constantValue = C0->getSExtValue(); 
-          if (optimizeWithShiftAddSub(Op1, constantValue, I)) {
+          if (optimizeMulWithShiftAddSub(Op1, constantValue, I)) {
               outs() << "MULT PER " << constantValue << " OTTIMIZZATA\n";
           }
       } else if (C1) {
           int constantValue = C1->getSExtValue();  
-          if (optimizeWithShiftAddSub(Op0, constantValue, I)) {
+          if (optimizeMulWithShiftAddSub(Op0, constantValue, I)) {
               outs() << "MULT PER " << constantValue << " OTTIMIZZATA \n";
           }
       }
+    } else if (I.getOpcode() == Instruction::UDiv || I.getOpcode() == Instruction::SDiv){
+      ConstantInt *C1 = dyn_cast<ConstantInt>(Op1); //right op
+      int constantValue = C1->getSExtValue(); 
+
+      if(C1){
+        if(optimizeDivWithShiftAddSub(Op0, constantValue, I)){
+          outs() << "DIVISIONE PER " << constantValue << " OTTIMIZZATA \n";
+        }
+      }
     }
-    
-    // if (I.getOpcode() == Instruction::Div || I.getOpcode() == Instruction::SDiv){
-    //   continue;
-    // }
     return true;
 
 
