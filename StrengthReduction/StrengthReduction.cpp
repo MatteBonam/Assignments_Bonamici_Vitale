@@ -30,31 +30,52 @@ namespace {
     int diff = constantValue - nearestPowerOf2;
 
     if ((constantValue & (constantValue - 1)) == 0) {
-      Instruction *newInstr = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftLeft", &I);
+      Instruction *newInstr = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftLeft");
+      newInstr->insertAfter(&I);   
       I.replaceAllUsesWith(newInstr);        
       return true;
   }  
     
-    if (diff != 0 && (diff & (diff - 1)) == 0) { 
+    if (diff != 0 && (abs(diff) & (abs(diff) - 1)) == 0) { 
         int q = log2(abs(diff));
         //calcolo il log del valore e 2^ris
-        
     
     if (diff > 0) {
-        // tipo 10 = 8 + 2 sostituisco [(operand << p) + (operand << q)]
-        // ==> operand << (2^)3 + operand << (2^)1
-        Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP", &I);
-        Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ", &I);
-        Instruction *add = BinaryOperator::CreateAdd(shiftP, shiftQ, "add", &I);
-        I.replaceAllUsesWith(add);        
-    } else {
+      // tipo 48 (log2(48) = 5.5 -> 6) ==> 64 - 16
+      // (operand << p) - (operand << q)
+      Instruction *add;
+      Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP");
+      shiftP->insertAfter(&I);      
+ 
+      if(q != 0){
+          Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ");
+          add = BinaryOperator::CreateAdd(shiftP, shiftQ, "add");
+          shiftQ->insertAfter(&I);
+      } else {
+          add = BinaryOperator::CreateAdd(shiftP, operand, "add");
+        }
+        add->insertAfter(shiftP);
+        // 2^4 - 2^0 = 15
+        I.replaceAllUsesWith(add); 
+      } else {
         // tipo 48 (log2(48) = 5.5 -> 6) ==> 64 - 16
         // (operand << p) - (operand << q)
-        Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP", &I);
-        Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ", &I);
-        Instruction *sub = BinaryOperator::CreateSub(shiftP, shiftQ, "sub", &I);
-        I.replaceAllUsesWith(sub); 
-    }
+        Instruction *sub;
+        Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP");
+        shiftP->insertAfter(&I);      
+   
+        if(q != 0){
+            Instruction *shiftQ = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), q), "shiftQ");
+            sub = BinaryOperator::CreateSub(shiftP, shiftQ, "sub");
+            shiftQ->insertAfter(&I);
+        } else {
+            sub = BinaryOperator::CreateSub(shiftP, operand, "sub");
+          }
+          sub->insertAfter(shiftP);
+          // 2^4 - 2^0 = 15
+          I.replaceAllUsesWith(sub); 
+        }
+    
       return true;
     }
 
@@ -99,16 +120,29 @@ namespace {
               outs() << "MULT PER " << constantValue << " OTTIMIZZATA \n";
           }
       }
-  }
+    }
+    
+    // if (I.getOpcode() == Instruction::Div || I.getOpcode() == Instruction::SDiv){
+    //   continue;
+    // }
     return true;
+
+
+    //   Manipolazione delle istruzioni
+    //Instruction *NewInst = BinaryOperator::Create(
+    //    Instruction::Add, Inst1st.getOperand(0), Inst1st.getOperand(0));
+
+    //NewInst->insertAfter(&Inst1st);
+    // Si possono aggiornare le singole references separatamente?
+    // Controlla la documentazione e prova a rispondere.
+    //Inst1st.replaceAllUsesWith(NewInst);
 }
 
 
 bool runOnBasicBlock(BasicBlock &B) {
     // Preleviamo le prime due istruzioni del BB
-    for (auto &I : B) {
-        if (runOnInstruction(I)) {
-        }
+    for (auto Iter = B.begin(); Iter != B.end(); ++Iter) {
+      if (runOnInstruction(*Iter)) {}
     }
     // L'indirizzo della prima istruzione deve essere uguale a quello del 
     // primo operando della seconda istruzione (per costruzione dell'esempio)

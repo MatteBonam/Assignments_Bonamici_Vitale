@@ -1,16 +1,18 @@
-; ModuleID = 'prova.m2r.bc'
-source_filename = "prova.c"
+; ModuleID = 'SRtest.m2r.bc'
+source_filename = "SRtest.c"
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128-Fn32"
 target triple = "arm64-apple-macosx15.0.0"
 
 ; Function Attrs: noinline nounwind ssp uwtable(sync)
-define i32 @strength_red() #0 {
-  %1 = mul nsw i32 10, 16
-  %2 = mul nsw i32 10, 15
-  %3 = mul nsw i32 10, 8
-  %4 = mul nsw i32 10, 7
-  %5 = mul nsw i32 10, 47
-  ret i32 0
+define i32 @strength_red(i32 noundef %0) #0 {
+  %2 = mul nsw i32 %0, 16
+  %3 = mul nsw i32 %0, 15
+  %4 = mul nsw i32 %0, 10
+  %5 = mul nsw i32 %0, 47
+  %6 = add nsw i32 %2, %3
+  %7 = add nsw i32 %4, %5
+  %8 = add nsw i32 %6, %7
+  ret i32 %8
 }
 
 attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="apple-m1" "target-features"="+aes,+altnzcv,+ccdp,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+fp16fml,+fptoint,+fullfp16,+jsconv,+lse,+neon,+pauth,+perfmon,+predres,+ras,+rcpc,+rdm,+sb,+sha2,+sha3,+specrestrict,+ssbs,+v8.1a,+v8.2a,+v8.3a,+v8.4a,+v8a,+zcm,+zcz" }

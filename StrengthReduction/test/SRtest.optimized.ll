@@ -1,21 +1,24 @@
-; ModuleID = 'test/output.optimized.bc'
-source_filename = "prova.c"
+; ModuleID = 'test/SRtest.optimized.bc'
+source_filename = "SRtest.c"
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128-Fn32"
 target triple = "arm64-apple-macosx15.0.0"
 
 ; Function Attrs: noinline nounwind ssp uwtable(sync)
-define i32 @strength_red() #0 {
-  %shiftLeft = shl i32 10, 4
-  %1 = mul nsw i32 10, 16
-  %2 = mul nsw i32 10, 15
-  %shiftLeft1 = shl i32 10, 3
-  %3 = mul nsw i32 10, 8
-  %4 = mul nsw i32 10, 7
-  %shiftP = shl i32 47, 3
-  %shiftQ = shl i32 47, 1
-  %add = add i32 %shiftP, %shiftQ
-  %5 = mul nsw i32 10, 47
-  ret i32 0
+define i32 @strength_red(i32 noundef %0) #0 {
+  %2 = mul nsw i32 %0, 16
+  %shiftLeft = shl i32 %0, 4
+  %3 = mul nsw i32 %0, 15
+  %shiftP = shl i32 %0, 4
+  %sub = sub i32 %shiftP, %0
+  %4 = mul nsw i32 %0, 10
+  %shiftQ = shl i32 %0, 1
+  %shiftP1 = shl i32 %0, 3
+  %add = add i32 %shiftP1, %shiftQ
+  %5 = mul nsw i32 %0, 47
+  %6 = add nsw i32 %shiftLeft, %sub
+  %7 = add nsw i32 %add, %5
+  %8 = add nsw i32 %6, %7
+  ret i32 %8
 }
 
 attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="apple-m1" "target-features"="+aes,+altnzcv,+ccdp,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+fp16fml,+fptoint,+fullfp16,+jsconv,+lse,+neon,+pauth,+perfmon,+predres,+ras,+rcpc,+rdm,+sb,+sha2,+sha3,+specrestrict,+ssbs,+v8.1a,+v8.2a,+v8.3a,+v8.4a,+v8a,+zcm,+zcz" }
