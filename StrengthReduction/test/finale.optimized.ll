@@ -1,14 +1,19 @@
-; ModuleID = 'test/prova.m2r.bc'
+; ModuleID = 'test/output.optimized.bc'
 source_filename = "prova.c"
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128-Fn32"
 target triple = "arm64-apple-macosx15.0.0"
 
 ; Function Attrs: noinline nounwind ssp uwtable(sync)
 define i32 @strength_red() #0 {
+  %shiftLeft = shl i32 10, 4
   %1 = mul nsw i32 10, 16
   %2 = mul nsw i32 10, 15
+  %shiftLeft1 = shl i32 10, 3
   %3 = mul nsw i32 10, 8
   %4 = mul nsw i32 10, 7
+  %shiftP = shl i32 47, 3
+  %shiftQ = shl i32 47, 1
+  %add = add i32 %shiftP, %shiftQ
   %5 = mul nsw i32 10, 47
   ret i32 0
 }
