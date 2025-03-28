@@ -89,7 +89,6 @@ namespace {
     int nearestPowerOf2 = nearestPowerOfTwo(constantValue);
     int diff = constantValue - nearestPowerOf2;
 
-    // Se il valore è una potenza di 2, effettuiamo solo lo shift a destra
     if ((constantValue & (constantValue - 1)) == 0) {
         Instruction *newInstr = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), p), "shiftRight");
         newInstr->insertAfter(&I);   
