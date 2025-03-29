@@ -20,6 +20,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Analysis/ValueTracking.h"
 
 using namespace llvm;
 
@@ -30,6 +31,19 @@ using namespace llvm;
 // everything in an anonymous namespace.
 namespace {
 
+  //Funzione per controllare se 2 valori A e B, qualunque, si annullano
+  bool isNegatedValue(Value *A, Value *B) {
+    // Caso 1: Entrambi sono ConstantInt
+    if (ConstantInt *CI_A = dyn_cast<ConstantInt>(A)) {
+        if (ConstantInt *CI_B = dyn_cast<ConstantInt>(B)) {
+            return CI_A->getValue() == -CI_B->getValue();
+        }
+    }
+    
+    // Caso 2: Usa isKnownNegation per casi non costanti
+    return isKnownNegation(A, B);
+}
+
 void runOnBinaryOperator(BinaryOperator *BO1, BinaryOperator *BO2)
 {
   //estraggo gli operandi
@@ -39,90 +53,34 @@ void runOnBinaryOperator(BinaryOperator *BO1, BinaryOperator *BO2)
   Value *IOp2 = BO2->getOperand(1);
   //se la mia istruzione e' una add, cerco una sub con un operando uguale ad uno dei miei operandi, 
   //essendo che uno degli operandi sono io, solo uno dei 2 puo' essere uguale ad uno dei miei operandi
-  if (BO1->getOpcode() == Instruction::Add && BO2->getOpcode() == Instruction::Sub)
+  if ((BO1->getOpcode() == Instruction::Add && BO2->getOpcode() == Instruction::Sub) || (BO1->getOpcode() == Instruction::Sub && BO2->getOpcode() == Instruction::Add))
   {
     outs() << "Sono: "  << *BO2 << " con operandi: " << *IOp1 << ' ' << *IOp2 << "\n";
-    if (ConstantInt *IC1 = dyn_cast<ConstantInt>(IOp1))
+    if ((Op1 == IOp1) || (Op1 == IOp2))
     {
-      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
-      {
-        if (IC1->getValue() - C1->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op2 << "\n";
-          BO2->replaceAllUsesWith(Op2);
-        }
-      }else
-      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
-      {
-        if (IC1->getValue() - C2->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op1 << "\n";
-          BO2->replaceAllUsesWith(Op1);
-        }
-      }
+      outs() << "Rimpiazzato con: " << *Op2 << "\n";
+      BO2->replaceAllUsesWith(Op2);
     }
-    if(ConstantInt *IC2 = dyn_cast<ConstantInt>(IOp2))
+    else if ((Op2 == IOp1) || (Op2 == IOp2))
     {
-      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
-      {
-        if (IC2->getValue() - C1->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op2 << "\n";
-          BO2->replaceAllUsesWith(Op2);
-        }
-      }else
-      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
-      {
-        if (IC2->getValue() - C2->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op1 << "\n";
-          BO2->replaceAllUsesWith(Op1);
-        }
-      }
+      outs() << "Rimpiazzato con: " << *Op1 << "\n";
+      BO2->replaceAllUsesWith(Op1);
     }
   }
   //se la mia istruzione e' una add, cerco una add con un operando uguale al negativo di uno dei miei operandi, 
   //essendo che uno degli operandi sono io, solo uno dei 2 puo' essere uguale al negativo di uno dei miei operandi
-  if (BO1->getOpcode() == Instruction::Add && BO2->getOpcode() == Instruction::Add)
+  if ((BO1->getOpcode() == Instruction::Add && BO2->getOpcode() == Instruction::Add) || (BO1->getOpcode() == Instruction::Sub && BO2->getOpcode() == Instruction::Sub))
   {
     outs() << "Sono: "  << *BO2 << " con operandi: " << *IOp1 << ' ' << *IOp2 << "\n";
-    if (ConstantInt *IC1 = dyn_cast<ConstantInt>(IOp1))
+    if (isNegatedValue(IOp1, Op1) || isNegatedValue(IOp2, Op1))
     {
-      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
-      {
-        if (IC1->getValue() + C1->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op2 << "\n";
-          BO2->replaceAllUsesWith(Op2);
-        }
-      }else
-      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
-      {
-        if (IC1->getValue() + C2->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op1 << "\n";
-          BO2->replaceAllUsesWith(Op1);
-        }
-      }
-    }
-    if(ConstantInt *IC2 = dyn_cast<ConstantInt>(IOp2))
+      outs() << "Rimpiazzato con: " << *Op2 << "\n";
+      BO2->replaceAllUsesWith(Op2);
+    }else
+    if (isNegatedValue(IOp1, Op2) || isNegatedValue(IOp2, Op2))
     {
-      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
-      {
-        if (IC2->getValue() + C1->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op2 << "\n";
-          BO2->replaceAllUsesWith(Op2);
-        }
-      }else
-      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
-      {
-        if (IC2->getValue() + C2->getValue() == 0)
-        {
-          outs() << "Rimpiazzato con: " << *Op1 << "\n";
-          BO2->replaceAllUsesWith(Op1);
-        }
-      }
+      outs() << "Rimpiazzato con: " << *Op1 << "\n";
+      BO2->replaceAllUsesWith(Op1);
     }
   }
   //se la mia istruzione e' una mul, cerco una div con un operando uguale a uno dei miei operandi,
@@ -130,24 +88,26 @@ void runOnBinaryOperator(BinaryOperator *BO1, BinaryOperator *BO2)
   if (BO1->getOpcode() == Instruction::Mul && BO2->getOpcode() == Instruction::SDiv)
   {
     outs() << "Sono: "  << *BO2 << " con operandi: " << *IOp1 << ' ' << *IOp2 << "\n";
-    if (ConstantInt *IC2 = dyn_cast<ConstantInt>(IOp2))
+    if (Op1 == IOp2)
     {
-      if (ConstantInt *C1 = dyn_cast<ConstantInt>(Op1))
-      {
-        if (IC2->getValue() == C1->getValue())
-        {
-          outs() << "Rimpiazzato con: " << *Op2 << "\n";
-          BO2->replaceAllUsesWith(Op2);
-        }
-      }else
-      if (ConstantInt *C2 = dyn_cast<ConstantInt>(Op2))
-      {
-        if (IC2->getValue() == C2->getValue())
-        {
-          outs() << "Rimpiazzato con: " << *Op1 << "\n";
-          BO2->replaceAllUsesWith(Op1);
-        }
-      }
+      outs() << "Rimpiazzato con: " << *Op2 << "\n";
+      BO2->replaceAllUsesWith(Op2);
+    }
+    else if (Op2 == IOp2)
+    {
+      outs() << "Rimpiazzato con: " << *Op1 << "\n";
+      BO2->replaceAllUsesWith(Op1);
+    }
+  }
+  //se la mia istruzione e' una div, cerco una mul con un operando uguale al mio sencondo operando,
+  //per assicurarmi che il prodotto sia diviso per lo stesso numero della moltiplicazione
+  if (BO1->getOpcode() == Instruction::SDiv && BO2->getOpcode() == Instruction::Mul)
+  {
+    outs() << "Sono: "  << *BO2 << " con operandi: " << *IOp1 << ' ' << *IOp2 << "\n";
+    if ((Op2 == IOp1) || (Op2 == IOp2))
+    {
+      outs() << "Rimpiazzato con: " << *Op1 << "\n";
+      BO2->replaceAllUsesWith(Op1);
     }
   }
 }
@@ -158,12 +118,13 @@ bool runOnBasicBlock(BasicBlock &B) {
     for (auto Iter = B.begin(); Iter != B.end(); ++Iter) {
       // Controllo che sia un' operazione binaria
       if (BinaryOperator *BI = dyn_cast<BinaryOperator>(Iter)) {
+        outs() << "Io sono: " << *BI << " di partenza\n";
         for (auto Ite = BI->use_begin(); Ite != BI->use_end(); ++Ite) {
           //controllo tutti gli usi dell'espressione
             if(BinaryOperator *I = dyn_cast<BinaryOperator>(Ite->getUser()))
             {
+              outs() << "Io sono: " << *I << " un uso\n";
               runOnBinaryOperator(BI, I);
-              outs() << "Io sono: " << *I << "\n";
             }
           }
         }
