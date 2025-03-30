@@ -1,6 +1,6 @@
 //=============================================================================
 // FILE:
-//    TestPass.cpp
+//    AlgebraicIdentity.cpp
 //
 // DESCRIPTION:
 //    Visits all functions in a module and prints their names. Strictly speaking, 
@@ -31,57 +31,38 @@ using namespace llvm;
 namespace {
 
 bool runOnInstruction(Instruction &I) {
-    outs() << "SONO: " << I.getOpcodeName() << "\n";
-    // Stampa la prima istruzione come operando
-    outs() << "COME OPERANDO: ";
-    I.printAsOperand(outs(), false);
-    outs() << "\n";
 
-    // User-->Use-->Value
-    outs() << "I MIEI OPERANDI SONO:\n";
-    for (auto *Iter = I.op_begin(); Iter != I.op_end(); ++Iter) {
-      Value *Operand = *Iter;
-
-      if (Argument *Arg = dyn_cast<Argument>(Operand)) {
-        outs() << "\t" << *Arg << ": SONO L'ARGOMENTO N. " << Arg->getArgNo() 
-	       <<" DELLA FUNZIONE " << Arg->getParent()->getName()
-               << "\n";
-      }
-      else if (ConstantInt *C = dyn_cast<ConstantInt>(Operand)) {
-        outs() << "\t" << *C << ": SONO UNA COSTANTE INTERA DI VALORE " << C->getValue()
-               << "\n";
-      }
-      else {
-        outs() << "\t" << *Operand << ": SONO UN OPERANDO GENERICO"
-               << "\n";
-      }
-    }
-
-    outs() << "LA LISTA DEI MIEI USERS:\n";
-    for (auto Iter = I.user_begin(); Iter != I.user_end(); ++Iter) {
-      outs() << "\t" << *(dyn_cast<Instruction>(*Iter)) << "\n";
-    }
-
-    outs() << "E DEI MIEI USI (CHE E' LA STESSA):\n";
-    for (auto Iter = I.use_begin(); Iter != I.use_end(); ++Iter) {
-      outs() << "\t" << *(dyn_cast<Instruction>(Iter->getUser())) << "\n";
-    }
-
-    if (I.getOpcode() == Instruction::Mul)
-    {
-      outs() << "SONO UNA " << I.getOpcodeName() << " ED HO COME PARAMETRI " << I.getOperand(0) << " E " << I.getOperand(1) << "\n";
-      if (ConstantInt *Con = dyn_cast<ConstantInt>(I.getOperand(1)))
-      {
-        outs() << "SONO IL SECONDO PARAMETRO E SONO UNA COSTANTE DI VALORE: " << *Con << "\n";
-        if (*Con){
-          Value* newValue = new Value();
-        Instruction *NewInst = BinaryOperator::Create(
-          Instruction::Shl, I.getOperand(0), newValue);
+    if (I.getOpcode() == Instruction::Mul){
+      outs() << "RILEVATA MUL " << "\n";
+      Value *Operand1 = I.getOperand(0);
+      Value *Operand2 = I.getOperand(1);
+      if (ConstantInt *C = dyn_cast<ConstantInt>(Operand1)){
+        outs() << "Opearand 1 -> " << C->getValue() << "\n";
+        if(C->getValue() == 1){
+          I.replaceAllUsesWith(Operand2);
         }
       }
-      else
-      {
-        outs() << "";
+      if(ConstantInt *C1 = dyn_cast<ConstantInt>(Operand2)){
+        outs() << "Opearand 2 -> " << C1->getValue() << "\n";
+          if(C1->getValue() == 1){
+            I.replaceAllUsesWith(Operand1);
+        }
+      }
+    } else if (I.getOpcode() == Instruction::Add){
+      outs() << "RILEVATA ADD " << "\n";
+      Value *Operand1 = I.getOperand(0);
+      Value *Operand2 = I.getOperand(1);
+      if (ConstantInt *C = dyn_cast<ConstantInt>(Operand1)){
+        outs() << "Opearand 1 -> " << C->getValue() << "\n";
+        if(C->getValue() == 0){
+          I.replaceAllUsesWith(Operand2);
+        }
+      }
+      if(ConstantInt *C1 = dyn_cast<ConstantInt>(Operand2)){
+        outs() << "Opearand 2 -> " << C1->getValue() << "\n";
+          if(C1->getValue() == 0){
+            I.replaceAllUsesWith(Operand1);
+        }
       }
     }
     //   Manipolazione delle istruzioni
@@ -112,7 +93,7 @@ bool runOnBasicBlock(BasicBlock &B) {
 
 
 // New PM implementation
-struct TestPass: PassInfoMixin<TestPass> {
+struct AlgebraicIdentity: PassInfoMixin<AlgebraicIdentity> {
   // Main entry point, takes IR unit to run the pass on (&F) and the
   // corresponding pass manager (to be queried if need be)
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &) {
@@ -138,14 +119,14 @@ struct TestPass: PassInfoMixin<TestPass> {
 //-----------------------------------------------------------------------------
 // New PM Registration
 //-----------------------------------------------------------------------------
-llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
-  return {LLVM_PLUGIN_API_VERSION, "TestPass", LLVM_VERSION_STRING,
+llvm::PassPluginLibraryInfo getAlgebraicIdentityPluginInfo() {
+  return {LLVM_PLUGIN_API_VERSION, "AlgebraicIdentity", LLVM_VERSION_STRING,
           [](PassBuilder &PB) {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "my-test-pass") {
-                    FPM.addPass(TestPass());
+                  if (Name == "AlgebraicIdentity") {
+                    FPM.addPass(AlgebraicIdentity());
                     return true;
                   }
                   return false;
@@ -158,5 +139,5 @@ llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
 // command line, i.e. via '-passes=test-pass'
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
-  return getTestPassPluginInfo();
+  return getAlgebraicIdentityPluginInfo();
 }

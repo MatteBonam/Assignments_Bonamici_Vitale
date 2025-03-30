@@ -1,0 +1,20 @@
+//opt/homebrew/Cellar/llvm/19.1.7_1/include
+
+compilare il passo:
+    clang++ -fPIC -shared -o build/StrengthReduction.so AlgebraicIdentity.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core`
+
+c to ll no opt: 
+    clang -Xclang -disable-O0-optnone -S -emit-llvm -O0 prova.c -o prova.ll
+rimuovi load/store:
+    opt -p mem2reg prova.ll -o prova.m2r.bc
+disasseblare bc:
+    llvm-dis prova.m2r.bc -o file.m2r.ll
+
+convertire il file .ll in .bc:
+    llvm-as test/test.ll -o test/test.bc
+
+applicare il pass e generare i file ottimizzati:
+    opt -load-pass-plugin=build/AlgebraicIdentity.so -passes="diobestia" test/test.bc -o build/output.optimized.bc
+
+Convertiamo poi il bitcode ottimizzato in .ll leggibile:
+    llvm-dis build/output.optimized.bc -o build/output.optimized.ll
