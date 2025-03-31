@@ -37,15 +37,17 @@ bool runOnInstruction(Instruction &I) {
       Value *Operand1 = I.getOperand(0);
       Value *Operand2 = I.getOperand(1);
       if (ConstantInt *C = dyn_cast<ConstantInt>(Operand1)){
-        outs() << "Opearand 1 -> " << C->getValue() << "\n";
+        outs() << "Operand 1 -> " << C->getValue() << "\n";
         if(C->getValue() == 1){
           I.replaceAllUsesWith(Operand2);
+          return true;
         }
       }
       if(ConstantInt *C1 = dyn_cast<ConstantInt>(Operand2)){
-        outs() << "Opearand 2 -> " << C1->getValue() << "\n";
+        outs() << "Operand 2 -> " << C1->getValue() << "\n";
           if(C1->getValue() == 1){
             I.replaceAllUsesWith(Operand1);
+            return true;
         }
       }
     } else if (I.getOpcode() == Instruction::Add){
@@ -53,41 +55,59 @@ bool runOnInstruction(Instruction &I) {
       Value *Operand1 = I.getOperand(0);
       Value *Operand2 = I.getOperand(1);
       if (ConstantInt *C = dyn_cast<ConstantInt>(Operand1)){
-        outs() << "Opearand 1 -> " << C->getValue() << "\n";
+        outs() << "Operand 1 -> " << C->getValue() << "\n";
         if(C->getValue() == 0){
           I.replaceAllUsesWith(Operand2);
+          return true;
         }
       }
       if(ConstantInt *C1 = dyn_cast<ConstantInt>(Operand2)){
-        outs() << "Opearand 2 -> " << C1->getValue() << "\n";
+        outs() << "Operand 2 -> " << C1->getValue() << "\n";
           if(C1->getValue() == 0){
             I.replaceAllUsesWith(Operand1);
+            return true;
+        }
+      }
+    }else if (I.getOpcode() == Instruction::Sub){
+      outs() << "RILEVATA SUB " << "\n";
+      Value *Operand1 = I.getOperand(0);
+      Value *Operand2 = I.getOperand(1);
+      if(ConstantInt *C1 = dyn_cast<ConstantInt>(Operand2)){
+        outs() << "Operand 2 -> " << C1->getValue() << "\n";
+          if(C1->getValue() == 0){
+            I.replaceAllUsesWith(Operand1);
+            return true;
+        }
+      }
+    }else if (I.getOpcode() == Instruction::SDiv || I.getOpcode() == Instruction::UDiv){
+      outs() << "RILEVATA ADD " << "\n";
+      Value *Operand1 = I.getOperand(0);
+      Value *Operand2 = I.getOperand(1);
+      if(ConstantInt *C1 = dyn_cast<ConstantInt>(Operand2)){
+        outs() << "Operand 2 -> " << C1->getValue() << "\n";
+          if(C1->getValue() == 1){
+            I.replaceAllUsesWith(Operand1);
+            return true;
         }
       }
     }
-    //   Manipolazione delle istruzioni
-    //Instruction *NewInst = BinaryOperator::Create(
-    //    Instruction::Add, Inst1st.getOperand(0), Inst1st.getOperand(0));
-
-    //NewInst->insertAfter(&Inst1st);
-    // Si possono aggiornare le singole references separatamente?
-    // Controlla la documentazione e prova a rispondere.
-    //Inst1st.replaceAllUsesWith(NewInst);
-    return true;
+    return false;
 }
 
 bool runOnBasicBlock(BasicBlock &B) {
     
+    bool transform = false;
     // Preleviamo le prime due istruzioni del BB
     for (auto Iter = B.begin(); Iter != B.end(); ++Iter) {
     if (runOnInstruction(*Iter)) {
+      transform = true;
       }
     }
     // L'indirizzo della prima istruzione deve essere uguale a quello del 
     // primo operando della seconda istruzione (per costruzione dell'esempio)
 
     
-    return true;
+    return transform;
   }
 
 
@@ -125,7 +145,7 @@ llvm::PassPluginLibraryInfo getAlgebraicIdentityPluginInfo() {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "AlgebraicIdentity") {
+                  if (Name == "A-I") {
                     FPM.addPass(AlgebraicIdentity());
                     return true;
                   }
