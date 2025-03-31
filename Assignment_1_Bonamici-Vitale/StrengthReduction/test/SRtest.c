@@ -6,5 +6,5 @@ int strength_red(int x){
 
     int d1 = x / 16;  //preciso
     int d2 = x / 15;  //no opt
-    return (m1+m2+m3+m4)+(d1+d2+d3+d4);
+    return (m1+m2+m3+m4)+(d1+d2);
 }
