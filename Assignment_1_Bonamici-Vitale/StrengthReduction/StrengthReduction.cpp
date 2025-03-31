@@ -2,6 +2,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
+#include "math.h"
 
 using namespace llvm;
 
@@ -194,7 +195,7 @@ llvm::PassPluginLibraryInfo getStrengthReductionPluginInfo() {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "StrengthReduction") {
+                  if (Name == "s-r") {
                     FPM.addPass(StrengthReduction());
                     return true;
                   }

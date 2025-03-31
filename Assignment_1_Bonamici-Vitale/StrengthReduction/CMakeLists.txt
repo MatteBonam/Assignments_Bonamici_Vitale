@@ -33,9 +33,9 @@ endif()
 #===============================================================================
 # 3. ADD THE TARGET
 #===============================================================================
-add_library(StrenghtReduction SHARED StrenghtReduction.cpp)
+add_library(StrengthReduction SHARED StrengthReduction.cpp)
 
 # Allow undefined symbols in shared objects on Darwin (this is the default
 # behaviour on Linux)
-target_link_libraries(StrenghtReduction
+target_link_libraries(StrengthReduction
   "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")

@@ -145,7 +145,7 @@ llvm::PassPluginLibraryInfo getAlgebraicIdentityPluginInfo() {
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, FunctionPassManager &FPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
-                  if (Name == "A-I") {
+                  if (Name == "a-i") {
                     FPM.addPass(AlgebraicIdentity());
                     return true;
                   }
