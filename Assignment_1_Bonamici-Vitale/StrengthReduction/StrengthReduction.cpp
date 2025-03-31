@@ -86,49 +86,11 @@ namespace {
     outs() << "RUNNO DIV OPT CON CV --> " << constantValue << "\n";
     
     int p = std::round(log2(constantValue));
-    int nearestPowerOf2 = nearestPowerOfTwo(constantValue);
-    int diff = constantValue - nearestPowerOf2;
 
     if ((constantValue & (constantValue - 1)) == 0) {
         Instruction *newInstr = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), p), "shiftRight");
         newInstr->insertAfter(&I);   
         I.replaceAllUsesWith(newInstr);        
-        return true;
-    }
-
-    if (diff != 0 && (abs(diff) & (abs(diff) - 1)) == 0) {
-        int q = log2(abs(diff));
-
-        if (diff > 0) {
-            Instruction *sub;
-            Instruction *shiftP = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), p), "shiftP");
-            shiftP->insertAfter(&I);      
-
-            if (q != 0) {
-                Instruction *shiftQ = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), q), "shiftQ");
-                sub = BinaryOperator::CreateSub(shiftP, shiftQ, "sub");
-                shiftQ->insertAfter(&I);
-            } else {
-                sub = BinaryOperator::CreateSub(shiftP, operand, "sub");
-            }
-            sub->insertAfter(shiftP);
-            I.replaceAllUsesWith(sub);
-        } else {
-            Instruction *add;
-            Instruction *shiftP = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), p), "shiftP");
-            shiftP->insertAfter(&I);      
-
-            if (q != 0) {
-                Instruction *shiftQ = BinaryOperator::CreateLShr(operand, ConstantInt::get(operand->getType(), q), "shiftQ");
-                add = BinaryOperator::CreateAdd(shiftP, shiftQ, "add");
-                shiftQ->insertAfter(&I);
-            } else {
-                add = BinaryOperator::CreateAdd(shiftP, operand, "add");
-            }
-            add->insertAfter(shiftP);
-            I.replaceAllUsesWith(add);
-        }
-
         return true;
     }
       return false;
