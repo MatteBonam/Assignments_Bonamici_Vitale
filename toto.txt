@@ -1,0 +1,12 @@
+//opt/homebrew/Cellar/llvm/19.1.7_1/include
+ 
+ 
+ clang++ -fPIC -shared -o build/LoopCodeMotion.so LoopCodeMotion.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core`
+ LoopCodeMotion
+ clang -Xclang -disable-O0-optnone -S -emit-llvm -O0 LItest.c -o LItest.ll
+ opt -p mem2reg LItest.ll -o LItest.m2r.bc
+ llvm-dis LItest.m2r.bc -o LItest.m2r.ll
+     
+ opt -load-pass-plugin=build/LoopCodeMotion.so -passes="li-opt" test/LItest.m2r.ll -o test/LItest.optimized.bc
+ llvm-dis test/LItest.optimized.bc -o test/LItest.optimized.ll
+ 
