@@ -33,7 +33,7 @@ endif()
 #===============================================================================
 # 3. ADD THE TARGET
 #===============================================================================
-add_library(LoopCodeMotion SHARED LoopInvCodeMotion.cpp)
+add_library(LoopCodeMotion SHARED prova.cpp)
 
 # Allow undefined symbols in shared objects on Darwin (this is the default
 # behaviour on Linux)
