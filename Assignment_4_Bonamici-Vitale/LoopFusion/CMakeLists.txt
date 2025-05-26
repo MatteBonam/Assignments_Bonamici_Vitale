@@ -33,9 +33,9 @@ endif()
 #===============================================================================
 # 3. ADD THE TARGET
 #===============================================================================
-add_library(LoopCodeMotion SHARED prova.cpp)
+add_library(LoopFusion SHARED LoopFusion.cpp)
 
 # Allow undefined symbols in shared objects on Darwin (this is the default
 # behaviour on Linux)
-target_link_libraries(LoopCodeMotion
+target_link_libraries(LoopFusion
   "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")
