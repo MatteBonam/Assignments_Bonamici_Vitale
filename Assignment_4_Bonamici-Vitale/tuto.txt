@@ -1,8 +1,0 @@
-clang++ -fPIC -shared -o build/LoopFusion.so LoopFusion.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core`
- 
- clang -Xclang -disable-O0-optnone -S -emit-llvm -O0 LFtest.c -o LFtest.ll
- opt -passes=mem2reg,simplifycfg,loop-simplify -o LFtest.m2r.bc LFtest.ll
- llvm-dis LFtest.m2r.bc -o LFtest.m2r.ll
-     
- opt -load-pass-plugin=build/LoopFusion.so -passes="lf" test/LFtest.m2r.ll -o test/LFtest.optimized.bc
- llvm-dis test/LFtest.optimized.bc -o test/LFtest.optimized.ll
