@@ -16,32 +16,40 @@ namespace {
 
 struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
     bool canFuse(Loop *firstLoop, Loop *secondLoop) {
-        return firstLoop->getLoopLatch() && secondLoop->getLoopLatch() &&
-               firstLoop->getUniqueExitBlock() && secondLoop->getUniqueExitBlock();
+        // Check all required blocks exist
+        BasicBlock *latch1 = firstLoop->getLoopLatch();
+        BasicBlock *latch2 = secondLoop->getLoopLatch();
+        BasicBlock *exit1 = firstLoop->getUniqueExitBlock();
+        BasicBlock *exit2 = secondLoop->getUniqueExitBlock();
+        BasicBlock *header1 = firstLoop->getHeader();
+        BasicBlock *header2 = secondLoop->getHeader();
+        BasicBlock *pre1 = firstLoop->getLoopPreheader();
+        BasicBlock *pre2 = secondLoop->getLoopPreheader();
+
+        return latch1 && latch2 && exit1 && exit2 && 
+               header1 && header2 && pre1 && pre2;
     }
 
-    bool areLoopsConnected(Loop *firstLoop, Loop *secondLoop) {
-        BasicBlock *firstLoopExit = firstLoop->getUniqueExitBlock();
-        BasicBlock *secondLoopEntry = secondLoop->getLoopPreheader();
+    bool areLoopsConnected(Loop *L1, Loop *L2) {
+        // Try both directions since we don't know the order in the CFG
+        return areLoopsDirectlyConnected(L1, L2) || areLoopsDirectlyConnected(L2, L1);
+    }
 
-        if (!firstLoopExit || !secondLoopEntry)
+    bool areLoopsDirectlyConnected(Loop *firstLoop, Loop *secondLoop) {
+        BasicBlock *Exit1 = firstLoop->getUniqueExitBlock();
+        BasicBlock *Pre2 = secondLoop->getLoopPreheader();
+        
+        if (!Exit1 || !Pre2) {
             return false;
+        }
 
-        SmallVector<BasicBlock*, 8> blocksToVisit;
-        SmallPtrSet<BasicBlock*, 8> visitedBlocks;
-        blocksToVisit.push_back(firstLoopExit);
-        visitedBlocks.insert(firstLoopExit);
+        if (Exit1 == Pre2) {
+            return true;
+        }
 
-        while (!blocksToVisit.empty()) {
-            BasicBlock *currentBlock = blocksToVisit.pop_back_val();
-            if (currentBlock == secondLoopEntry)
+        for (BasicBlock *Succ : successors(Exit1)) {
+            if (Succ == Pre2) {
                 return true;
-
-            for (BasicBlock *nextBlock : successors(currentBlock)) {
-                if (!visitedBlocks.contains(nextBlock)) {
-                    visitedBlocks.insert(nextBlock);
-                    blocksToVisit.push_back(nextBlock);
-                }
             }
         }
 
@@ -49,89 +57,7 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
     }
 
     bool fuse(Loop *firstLoop, Loop *secondLoop, DominatorTree &domTree, LoopInfo &loopInfo) {
-        errs() << "Starting loop fusion...\n";
-        
-        BasicBlock *firstHeader = firstLoop->getHeader();
-        BasicBlock *firstLatch = firstLoop->getLoopLatch();
-        BasicBlock *firstExit = firstLoop->getUniqueExitBlock();
-        BasicBlock *secondHeader = secondLoop->getHeader();
-        BasicBlock *secondLatch = secondLoop->getLoopLatch();
-        BasicBlock *secondExit = secondLoop->getUniqueExitBlock();
-        BasicBlock *secondEntry = secondLoop->getLoopPreheader();
-
-        if (!firstHeader || !firstLatch || !firstExit || !secondHeader || 
-            !secondLatch || !secondExit || !secondEntry) {
-            errs() << "Missing required blocks\n";
-            return false;
-        }
-
-        SmallVector<BasicBlock*, 8> originalSecondLoopBlocks(secondLoop->blocks().begin(), 
-                                                            secondLoop->blocks().end());
-        
-        ValueToValueMapTy valueMap;
-        SmallVector<BasicBlock*, 8> clonedBlocks;
-
-        for (BasicBlock *block : secondLoop->blocks()) {
-            BasicBlock *clonedBlock = CloneBasicBlock(block, valueMap, ".fused", 
-                                                     block->getParent());
-            valueMap[block] = clonedBlock;
-            clonedBlocks.push_back(clonedBlock);
-        }
-
-        for (BasicBlock *clonedBlock : clonedBlocks) {
-            for (Instruction &inst : *clonedBlock) {
-                RemapInstruction(&inst, valueMap, RF_NoModuleLevelChanges | 
-                               RF_IgnoreMissingLocals);
-            }
-        }
-
-        BasicBlock *clonedHeader = cast<BasicBlock>(valueMap[secondHeader]);
-        BasicBlock *clonedExit = cast<BasicBlock>(valueMap[secondExit]);
-
-        for (auto &inst : *clonedHeader) {
-            if (auto *phiNode = dyn_cast<PHINode>(&inst)) {
-                int entryIndex = phiNode->getBasicBlockIndex(secondEntry);
-                if (entryIndex != -1) {
-                    Value *incomingValue = phiNode->getIncomingValue(entryIndex);
-                    phiNode->removeIncomingValue(entryIndex);
-                    phiNode->addIncoming(incomingValue, firstLatch);
-                }
-            } else {
-                break;
-            }
-        }
-
-        if (BranchInst *branchInst = dyn_cast<BranchInst>(firstLatch->getTerminator())) {
-            if (branchInst->isConditional()) {
-                for (unsigned i = 0; i < branchInst->getNumSuccessors(); ++i) {
-                    if (branchInst->getSuccessor(i) == firstExit) {
-                        branchInst->setSuccessor(i, clonedHeader);
-                        break;
-                    }
-                }
-            } else {
-                branchInst->replaceUsesOfWith(firstExit, clonedHeader);
-            }
-        }
-
-        if (BranchInst *exitBranch = dyn_cast<BranchInst>(clonedExit->getTerminator())) {
-            exitBranch->replaceUsesOfWith(secondExit, firstExit);
-        }
-
-        loopInfo.erase(secondLoop);
-        
-        if (secondEntry->use_empty()) {
-            secondEntry->eraseFromParent();
-        }
-
-        for (BasicBlock *clonedBlock : clonedBlocks) {
-            firstLoop->addBasicBlockToLoop(clonedBlock, loopInfo);
-        }
-        
-        domTree.recalculate(*firstHeader->getParent());
-        
-        errs() << "Loop fusion completed successfully!\n";
-        return true;
+        return false;  // Fusion disabled for debugging
     }
 
     PreservedAnalyses run(Function &function, FunctionAnalysisManager &analysisManager) {
@@ -146,22 +72,31 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         errs() << "Found " << topLevelLoops.size() << " top-level loops\n";
 
         for (size_t i = 0; i + 1 < topLevelLoops.size(); ++i) {
-            Loop *firstLoop = topLevelLoops[i];
-            Loop *secondLoop = topLevelLoops[i + 1];
+            Loop *L1 = topLevelLoops[i];
+            Loop *L2 = topLevelLoops[i + 1];
 
-            errs() << "\nAnalyzing loop pair " << i << " and " << (i+1) << ":\n";
+            errs() << "\nCoppia loops -> " << i << " & " << (i+1) << ":\n";
 
-            if (!canFuse(firstLoop, secondLoop)) {
+            if (!canFuse(L1, L2)) {
                 errs() << "Loops cannot be fused: missing latch or exit block\n";
                 continue;
             }
 
-            if (!areLoopsConnected(firstLoop, secondLoop)) {
+            if (!areLoopsConnected(L1, L2)) {
                 errs() << "Loops are not directly connected in CFG\n";
                 continue;
             }
 
-            errs() << "Connected loops found! Attempting fusion...\n";
+            errs() << "Trovati loop adiacenti!\n";
+            
+            //Troviamo ordine loops
+            Loop *firstLoop = L1;
+            Loop *secondLoop = L2;
+            if (areLoopsDirectlyConnected(L2, L1)) {
+                errs() << "Swappo ordine loops!\n";
+                std::swap(firstLoop, secondLoop);
+            }
+
             if (fuse(firstLoop, secondLoop, domTree, loopInfo)) {
                 errs() << "Fusion successful!\n";
                 modified = true;
