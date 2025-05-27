@@ -17,27 +17,44 @@ using namespace llvm;
 namespace {
 
 struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
-    bool canFuse(Loop *firstLoop, Loop *secondLoop) {
+    bool canFuse(Loop *L1, Loop *L2) {
         // Check all required blocks exist
-        BasicBlock *latch1 = firstLoop->getLoopLatch();
-        BasicBlock *latch2 = secondLoop->getLoopLatch();
-        BasicBlock *exit1 = firstLoop->getUniqueExitBlock();
-        BasicBlock *exit2 = secondLoop->getUniqueExitBlock();
-        BasicBlock *header1 = firstLoop->getHeader();
-        BasicBlock *header2 = secondLoop->getHeader();
-        BasicBlock *pre1 = firstLoop->getLoopPreheader();
-        BasicBlock *pre2 = secondLoop->getLoopPreheader();
+        BasicBlock *latch1 = L1->getLoopLatch();
+        BasicBlock *latch2 = L2->getLoopLatch();
+        BasicBlock *exit1 = L1->getUniqueExitBlock();
+        BasicBlock *exit2 = L2->getUniqueExitBlock();
+        BasicBlock *header1 = L1->getHeader();
+        BasicBlock *header2 = L2->getHeader();
+        BasicBlock *pre1 = L1->getLoopPreheader();
+        BasicBlock *pre2 = L2->getLoopPreheader();
 
         return latch1 && latch2 && exit1 && exit2 && 
                header1 && header2 && pre1 && pre2;
     }
 
-    bool areLoopsConnected(Loop *L1, Loop *L2) {
-        // Try both directions since we don't know the order in the CFG
-        return areLoopsDirectlyConnected(L1, L2) || areLoopsDirectlyConnected(L2, L1);
+    bool haveSameIterations(Loop *L1, Loop *L2, ScalarEvolution &SE) {
+        const SCEV *tripCount1 = SE.getBackedgeTakenCount(L1);
+        const SCEV *tripCount2 = SE.getBackedgeTakenCount(L2);
+        
+        if (!tripCount1 || !tripCount2) {
+            errs() << "Trip count not computed\n";
+            return false;
+        }
+        
+        errs() << "Trip counts:\n";
+        errs() << "  L1: " << *tripCount1 << "\n";
+        errs() << "  L2: " << *tripCount2 << "\n";
+        
+        bool equal = tripCount1 == tripCount2;
+        errs() << "  Uguali: " << (equal ? "si" : "no") << "\n";
+        return equal;
     }
 
-    bool areLoopsDirectlyConnected(Loop *L1, Loop *L2) {
+    bool areConnected(Loop *L1, Loop *L2) {
+        return DirectlyConnected(L1, L2) || DirectlyConnected(L2, L1);
+    }
+
+    bool DirectlyConnected(Loop *L1, Loop *L2) {
         BasicBlock *Exit1 = L1->getUniqueExitBlock();
         BasicBlock *Pre2 = L2->getLoopPreheader();
         BasicBlock *Header1 = L1->getHeader();
@@ -65,11 +82,9 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         // caso 2: pattern con guardia
         BasicBlock *Guard = nullptr;
         
-        // cerca il blocco di guardia guardando i predecessori del preheader
         for (BasicBlock *Pred : predecessors(Pre1)) {
             errs() << "  controllo predecessore del preheader: " << Pred->getName() << "\n";
             
-            // verifica che sia un branch condizionale
             if (BranchInst *Branch = dyn_cast<BranchInst>(Pred->getTerminator())) {
                 errs() << "    trovato branch: " << *Branch << "\n";
                 
@@ -78,14 +93,12 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
                     continue;
                 }
                 
-                // verifica che i successori portino ai due loop
                 BasicBlock *Succ0 = Branch->getSuccessor(0);
                 BasicBlock *Succ1 = Branch->getSuccessor(1);
                 
                 errs() << "    successore 0: " << Succ0->getName() << "\n";
                 errs() << "    successore 1: " << Succ1->getName() << "\n";
                 
-                // controlla se un successore porta al primo loop e l'altro al secondo
                 bool toL1_0 = (Succ0 == Pre1);
                 bool toL1_1 = (Succ1 == Pre1);
                 bool toL2_0 = (Succ0 == Pre2);
@@ -112,7 +125,7 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         return false;
     }
 
-    bool areControlFlowEquivalent(Loop *L0, Loop *L1, DominatorTree &DT, PostDominatorTree &PDT) {
+    bool areCFEquiv(Loop *L0, Loop *L1, DominatorTree &DT, PostDominatorTree &PDT) {
         BasicBlock *Pre0 = L0->getLoopPreheader();
         BasicBlock *Pre1 = L1->getLoopPreheader();
         BasicBlock *Exit0 = L0->getUniqueExitBlock();
@@ -126,7 +139,7 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         bool L0DominatesL1 = DT.dominates(Pre0, Pre1);
         bool L1PostDominatesL0 = PDT.dominates(Exit1, Exit0);
         
-        errs() << "flow Equivalence check:\n";
+        errs() << "Flow Equivalence check:\n";
         errs() << "  L0 domina L1: " << (L0DominatesL1 ? "si" : "no") << "\n";
         errs() << "  L1 post-domina L0: " << (L1PostDominatesL0 ? "si" : "no") << "\n";
         
@@ -141,14 +154,15 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         return false;  
     }
 
-    PreservedAnalyses run(Function &function, FunctionAnalysisManager &analysisManager) {
-        errs() << "\n=== Starting function analysis: " << function.getName() << " ===\n";
+    PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
+        errs() << "\n=== Starting function analysis: " << F.getName() << " ===\n";
         
-        auto &loopInfo = analysisManager.getResult<LoopAnalysis>(function);
-        auto &domTree = analysisManager.getResult<DominatorTreeAnalysis>(function);
-        auto &postDomTree = analysisManager.getResult<PostDominatorTreeAnalysis>(function);
+        auto &LI = FAM.getResult<LoopAnalysis>(F);
+        auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
+        auto &PDT = FAM.getResult<PostDominatorTreeAnalysis>(F);
+        auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
 
-        SmallVector<Loop*, 8> topLevelLoops(loopInfo.begin(), loopInfo.end());
+        SmallVector<Loop*, 8> topLevelLoops(LI.begin(), LI.end());
         bool modified = false;
 
         errs() << "Found " << topLevelLoops.size() << " top-level loops\n";
@@ -164,28 +178,31 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
                 continue;
             }
 
-            if (!areLoopsConnected(L1, L2)) {
-                errs() << "Loops are not directly connected in CFG\n";
+            if (!areConnected(L1, L2)) {
+                errs() << "Loops are not connected in CFG\n";
                 continue;
             }
 
             errs() << "Trovati loop adiacenti!\n";
             
-            //Troviamo ordine loops
-            Loop *firstLoop = L1;
-            Loop *secondLoop = L2;
-            if (areLoopsDirectlyConnected(L2, L1)) {
+            Loop *first = L1;
+            Loop *second = L2;
+            if (DirectlyConnected(L2, L1)) {
                 errs() << "Swappo ordine loops!\n";
-                std::swap(firstLoop, secondLoop);
+                std::swap(first, second);
             }
 
-            // Verifica control flow equivalence dopo aver determinato l'ordine
-            if (!areControlFlowEquivalent(firstLoop, secondLoop, domTree, postDomTree)) {
+            if (!areCFEquiv(first, second, DT, PDT)) {
                 errs() << "Loops are not control flow equivalent\n";
                 continue;
             }
 
-            if (fuse(firstLoop, secondLoop, domTree, loopInfo)) {
+            if (!haveSameIterations(first, second, SE)) {
+                errs() << "Loops have different number of iterations\n";
+                continue;
+            }
+
+            if (fuse(first, second, DT, LI)) {
                 errs() << "Fusion successful!\n";
                 modified = true;
                 topLevelLoops.erase(topLevelLoops.begin() + i + 1);
