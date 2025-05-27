@@ -18,7 +18,7 @@ namespace {
 
 struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
     bool canFuse(Loop *L1, Loop *L2) {
-        // Check all required blocks exist
+        // verifica che tutti i blocchi richiesti esistano
         BasicBlock *latch1 = L1->getLoopLatch();
         BasicBlock *latch2 = L2->getLoopLatch();
         BasicBlock *exit1 = L1->getUniqueExitBlock();
@@ -37,11 +37,11 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         const SCEV *tripCount2 = SE.getBackedgeTakenCount(L2);
         
         if (!tripCount1 || !tripCount2) {
-            errs() << "Trip count not computed\n";
+            errs() << "impossibile calcolare il numero di iterazioni\n";
             return false;
         }
         
-        errs() << "Trip counts:\n";
+        errs() << "numero di iterazioni:\n";
         errs() << "  L1: " << *tripCount1 << "\n";
         errs() << "  L2: " << *tripCount2 << "\n";
         
@@ -209,197 +209,194 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
     }
 
     bool fuse(Loop *firstLoop, Loop *secondLoop, DominatorTree &DT, LoopInfo &LI) {
+        // recupero tutti i blocchi necessari
         BasicBlock *Header1 = firstLoop->getHeader();
-        BasicBlock *Body1 = firstLoop->getLoopLatch();
-        BasicBlock *Exit1 = firstLoop->getUniqueExitBlock();
-        BasicBlock *Pre1 = firstLoop->getLoopPreheader();
         BasicBlock *Header2 = secondLoop->getHeader();
-        BasicBlock *Body2 = secondLoop->getLoopLatch();
+        BasicBlock *Latch1 = firstLoop->getLoopLatch();
+        BasicBlock *Latch2 = secondLoop->getLoopLatch();
         BasicBlock *Exit2 = secondLoop->getUniqueExitBlock();
+        BasicBlock *Body1 = nullptr;
+        BasicBlock *Body2 = nullptr;
         
-        if (!Header1 || !Body1 || !Exit1 || !Pre1 || !Header2 || !Body2 || !Exit2) {
-            errs() << "Blocchi necessari mancanti per la fusione\n";
+        // cerco i blocchi body (primo blocco non-header e non-latch)
+        for (BasicBlock *BB : firstLoop->getBlocks()) {
+            if (BB != Header1 && BB != Latch1) {
+                Body1 = BB;
+                break;
+            }
+        }
+        
+        for (BasicBlock *BB : secondLoop->getBlocks()) {
+            if (BB != Header2 && BB != Latch2) {
+                Body2 = BB;
+                break;
+            }
+        }
+        
+        if (!Header1 || !Header2 || !Body1 || !Body2 || !Latch1 || !Latch2 || !Exit2) {
+            errs() << "Blocchi richiesti mancanti\n";
             return false;
         }
 
-        // variabili di induzione
-        PHINode *Ind1 = nullptr;
-        PHINode *Ind2 = nullptr;
-        Value *StepVal = nullptr;
+        errs() << "\n=== Inizio Fusione Loop ===\n";
         
-        // PHI nodes header
-        for (PHINode &PHI : Header1->phis()) {
-            // se è una PHI node che incrementa di 1, è probabilmente la nostra variabile di induzione
-            if (auto *IncInst = dyn_cast<BinaryOperator>(PHI.getIncomingValueForBlock(Body1))) {
-                if (IncInst->getOpcode() == Instruction::Add) {
-                    if (auto *Const = dyn_cast<ConstantInt>(IncInst->getOperand(1))) {
-                        if (Const->getValue() == 1) {
-                            Ind1 = &PHI;
-                            StepVal = IncInst;
-                            break;
-                        }
-                    }
-                }
-            }
+        // Passo 1: sostituzione variabile induzione
+        PHINode *IndVar1;
+        PHINode *IndVar2;
+
+        // recupero IndVar1 nel primo header
+        for (BasicBlock::iterator I = Header1->begin(); isa<PHINode>(I); ++I) {
+            PHINode *Phi = cast<PHINode>(I);
+            IndVar1 = Phi;
+            break;
         }
-        
-        for (PHINode &PHI : Header2->phis()) {
-            if (auto *IncInst = dyn_cast<BinaryOperator>(PHI.getIncomingValueForBlock(Body2))) {
-                if (IncInst->getOpcode() == Instruction::Add) {
-                    if (auto *Const = dyn_cast<ConstantInt>(IncInst->getOperand(1))) {
-                        if (Const->getValue() == 1) {
-                            Ind2 = &PHI;
-                            break;
-                        }
-                    }
-                }
-            }
+
+        // recupero IndVar2 nel secondo header
+        for (BasicBlock::iterator I = Header2->begin(); isa<PHINode>(I); ++I) {
+            PHINode *Phi = cast<PHINode>(I);
+            IndVar2 = Phi;
+            break;
         }
-        
-        if (!Ind1 || !Ind2) {
+
+        if (!IndVar1 || !IndVar2) {
             errs() << "Variabili di induzione non trovate\n";
             return false;
         }
 
-        errs() << "Trovate variabili di induzione:\n";
-        errs() << "  Loop1: " << *Ind1 << "\n";
-        errs() << "  Loop2: " << *Ind2 << "\n";
+        // Debug della sostituzione delle variabili
+        errs() << "\n=== debug sostituzione variabile induzione ===\n";
+        errs() << "indVar1: " << *IndVar1 << "\n";
+        errs() << "indVar2: " << *IndVar2 << "\n";
 
-        // sostituzione usi della variabile di induzione del secondo loop nel suo body
-        for (Instruction &I : *Body2) {
-            for (unsigned i = 0; i < I.getNumOperands(); ++i) {
-                if (I.getOperand(i) == Ind2) {
-                    I.setOperand(i, Ind1);
+        // sostituisco tutti gli usi di IndVar2 con IndVar1 nei blocchi del secondo loop
+        for (BasicBlock *BB : secondLoop->getBlocks()) {
+            if (BB == Header2) continue;
+            
+            errs() << "\nprocesso blocco: " << BB->getName() << "\n";
+            
+            for (Instruction &I : *BB) {
+                bool modified = false;
+                for (unsigned i = 0; i < I.getNumOperands(); ++i) {
+                    if (I.getOperand(i) == IndVar2) {
+                        errs() << "  sostituisco in: " << I << "\n";
+                        errs() << "    operando " << i << ": " << *IndVar2 << " -> " << *IndVar1 << "\n";
+                        I.setOperand(i, IndVar1);
+                        modified = true;
+                    }
+                }
+                if (modified) {
+                    errs() << "  risultato: " << I << "\n";
                 }
             }
         }
 
-        // 3. Modifica il CFG:
-        // - Il body del primo loop deve saltare al body del secondo
-        // - Il body del secondo loop deve saltare al header del primo
-        // - Il header del primo loop deve saltare all'exit del secondo quando finisce
-        
-        // Modifica il branch del header1 per saltare a Exit2
-        BranchInst *HeaderTerm1 = dyn_cast<BranchInst>(Header1->getTerminator());
-        if (!HeaderTerm1) {
-            errs() << "Terminatore dell'header del primo loop non trovato\n";
-            return false;
-        }
-        
-        Value *Cond = nullptr;
-        if (HeaderTerm1->isConditional()) {
-            Cond = HeaderTerm1->getCondition();
-        }
-        HeaderTerm1->eraseFromParent();
-        
-        if (Cond) {
-            BranchInst::Create(Body1, Exit2, Cond, Header1);
-        } else {
-            BranchInst::Create(Body1, Header1);
+        // Trasformazione CFG secondo schema
+        errs() << "\ntrasformazione CFG:\n";
+
+        // HeaderLoop1 -> L2Exit
+        Instruction *Header1Term = Header1->getTerminator();
+        for (unsigned i = 0; i < Header1Term->getNumSuccessors(); ++i) {
+            if (Header1Term->getSuccessor(i) == Body1) {
+                errs() << "  redirigo Header1 -> Exit2\n";
+                Header1Term->setSuccessor(i, Exit2);
+            }
         }
 
-        // Modifica il branch del body1 per saltare al body2
-        BranchInst *Term1 = dyn_cast<BranchInst>(Body1->getTerminator());
-        if (!Term1) {
-            errs() << "Terminatore del primo body non trovato\n";
-            return false;
+        // Body1 -> Body2
+        Instruction *Body1Term = Body1->getTerminator();
+        for (unsigned i = 0; i < Body1Term->getNumSuccessors(); ++i) {
+            errs() << "  redirigo Body1 -> Body2\n";
+            Body1Term->setSuccessor(i, Body2);
         }
-        Term1->eraseFromParent();
-        BranchInst::Create(Body2, Body1);
 
-        // Modifica il branch del body2 per saltare al header1
-        BranchInst *Term2 = dyn_cast<BranchInst>(Body2->getTerminator());
-        if (!Term2) {
-            errs() << "Terminatore del secondo body non trovato\n";
-            return false;
+        // Header2 -> Latch2
+        Instruction *Header2Term = Header2->getTerminator();
+        for (unsigned i = 0; i < Header2Term->getNumSuccessors(); ++i) {
+            errs() << "  redirigo Header2 -> Latch2\n";
+            Header2Term->setSuccessor(i, Latch2);
         }
-        Term2->eraseFromParent();
-        BranchInst::Create(Header1, Body2);
 
-        // 4. Aggiorna la PHI node del primo loop per riflettere il nuovo CFG
-        Value *InitVal = Ind1->getIncomingValueForBlock(Pre1);
-        Ind1->removeIncomingValue(Body1);
-        Ind1->addIncoming(StepVal, Body2);
+        // Body2 -> Latch1
+        Instruction *Body2Term = Body2->getTerminator();
+        for (unsigned i = 0; i < Body2Term->getNumSuccessors(); ++i) {
+            errs() << "  redirigo Body2 -> Latch1\n";
+            Body2Term->setSuccessor(i, Latch1);
+        }
 
-        // 5. Rimuovi la PHI node del secondo loop
-        Ind2->replaceAllUsesWith(UndefValue::get(Ind2->getType()));
-        Ind2->eraseFromParent();
+        // rimuovo il secondo loop dalla LoopInfo
+        LI.erase(secondLoop);
 
-        // 6. Aggiorna il DominatorTree
-        DT.recalculate(*firstLoop->getHeader()->getParent());
+        // ricalcolo l'albero dei dominatori
+        DT.recalculate(*Header1->getParent(), ArrayRef<DominatorTree::UpdateType>());
 
-        errs() << "Fusione completata con nuovo pattern:\n";
-        errs() << "  - Header1 -> Exit2\n";
-        errs() << "  - Body1 -> Body2\n";
-        errs() << "  - Body2 -> Header1\n";
-        
+        errs() << "=== fusione loop completata ===\n";
         return true;
     }
 
     PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
-        errs() << "\n=== Starting function analysis: " << F.getName() << " ===\n";
+        errs() << "\n=== inizio analisi funzione: " << F.getName() << " ===\n";
         
         auto &LI = FAM.getResult<LoopAnalysis>(F);
         auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
         auto &PDT = FAM.getResult<PostDominatorTreeAnalysis>(F);
         auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
 
-        SmallVector<Loop*, 8> topLevelLoops(LI.begin(), LI.end());
+        SmallVector<Loop*, 8> Loops(LI.begin(), LI.end());
         bool modified = false;
 
-        errs() << "Found " << topLevelLoops.size() << " top-level loops\n";
+        errs() << "trovati " << Loops.size() << " loops\n";
 
-        for (size_t i = 0; i + 1 < topLevelLoops.size(); ++i) {
-            Loop *L1 = topLevelLoops[i];
-            Loop *L2 = topLevelLoops[i + 1];
+        for (size_t i = 0; i + 1 < Loops.size(); ++i) {
+            Loop *L1 = Loops[i];
+            Loop *L2 = Loops[i + 1];
 
-            errs() << "\nCoppia loops -> " << i << " & " << (i+1) << ":\n";
+            errs() << "\ncoppia loops -> " << i << " & " << (i+1) << ":\n";
 
             if (!canFuse(L1, L2)) {
-                errs() << "Loops cannot be fused: missing latch or exit block\n";
+                errs() << "impossibile fondere i loop: mancano blocchi latch o exit\n";
                 continue;
             }
 
             if (!areConnected(L1, L2)) {
-                errs() << "Loops are not connected in CFG\n";
+                errs() << "i loop non sono connessi nel CFG\n";
                 continue;
             }
 
-            errs() << "Trovati loop adiacenti!\n";
+            errs() << "trovati loop adiacenti!\n";
             
             Loop *first = L1;
             Loop *second = L2;
             if (DirectlyConnected(L2, L1)) {
-                errs() << "Swappo ordine loops!\n";
+                errs() << "scambio ordine dei loop!\n";
                 std::swap(first, second);
             }
 
             if (!areCFEquiv(first, second, DT, PDT)) {
-                errs() << "Loops are not control flow equivalent\n";
+                errs() << "i loop non sono control flow equivalent\n";
                 continue;
             }
 
             if (!haveSameIterations(first, second, SE)) {
-                errs() << "Loops have different number of iterations\n";
+                errs() << "i loop hanno un numero diverso di iterazioni\n";
                 continue;
             }
 
             if (areNegDistance(first, second)) {
-                errs() << "Dipendenza negativa trovata tra i loop\n";
+                errs() << "trovata dipendenza negativa tra i loop\n";
                 continue;
             }
 
             if (fuse(first, second, DT, LI)) {
-                errs() << "FUSIONE RIUSCITA!\n";
+                errs() << "fusione riuscita!\n";
                 modified = true;
-                topLevelLoops.erase(topLevelLoops.begin() + i + 1);
+                Loops.erase(Loops.begin() + i + 1);
                 --i;
             } else {
-                errs() << "Fusion failed\n";
+                errs() << "fusione fallita\n";
             }
         }
 
-        errs() << "=== Function analysis complete ===\n\n";
+        errs() << "=== analisi funzione completata ===\n\n";
         return modified ? PreservedAnalyses::none() : PreservedAnalyses::all();
     }
 
