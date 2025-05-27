@@ -4,6 +4,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/Analysis/PostDominators.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -16,9 +17,6 @@ using namespace llvm;
 namespace {
 
 struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
-    LoopInfo *LI;
-    DominatorTree *DT;
-
     bool canFuse(Loop *firstLoop, Loop *secondLoop) {
         // Check all required blocks exist
         BasicBlock *latch1 = firstLoop->getLoopLatch();
@@ -46,31 +44,46 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         BasicBlock *Header2 = L2->getHeader();
         BasicBlock *Pre1 = L1->getLoopPreheader();
         
-        if (!Exit1 || !Pre2) return false;
+        if (!Exit1 || !Pre2) {
+            errs() << "-> blocchi richiesti mancanti\n";
+            return false;
+        }
 
         // caso 1: connessione diretta
         if (Exit1 == Pre2) {
-            errs() << "-> rilevata connessione diretta\n";
+            errs() << "-> CASO 1: connessione diretta (exit = preheader)\n";
             return true;
         }
         for (BasicBlock *Succ : successors(Exit1))
             if (Succ == Pre2) {
-                errs() << "-> rilevata connessione diretta\n";
+                errs() << "-> CASO 1: connessione diretta (exit -> preheader)\n";
                 return true;
             }
+
+        errs() << "\n-> cerco pattern con guardia...\n";
         
         // caso 2: pattern con guardia
         BasicBlock *Guard = nullptr;
         
         // cerca il blocco di guardia guardando i predecessori del preheader
         for (BasicBlock *Pred : predecessors(Pre1)) {
+            errs() << "  controllo predecessore del preheader: " << Pred->getName() << "\n";
+            
             // verifica che sia un branch condizionale
             if (BranchInst *Branch = dyn_cast<BranchInst>(Pred->getTerminator())) {
-                if (!Branch->isConditional()) continue;
+                errs() << "    trovato branch: " << *Branch << "\n";
+                
+                if (!Branch->isConditional()) {
+                    errs() << "    non è condizionale\n";
+                    continue;
+                }
                 
                 // verifica che i successori portino ai due loop
                 BasicBlock *Succ0 = Branch->getSuccessor(0);
                 BasicBlock *Succ1 = Branch->getSuccessor(1);
+                
+                errs() << "    successore 0: " << Succ0->getName() << "\n";
+                errs() << "    successore 1: " << Succ1->getName() << "\n";
                 
                 // controlla se un successore porta al primo loop e l'altro al secondo
                 bool toL1_0 = (Succ0 == Pre1);
@@ -80,13 +93,18 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
                 
                 if ((toL1_0 && toL2_1) || (toL1_1 && toL2_0)) {
                     Guard = Pred;
+                    errs() << "  trovata guardia!\n";
                     break;
                 }
+                
+                errs() << "non porta ai loop corretti\n";
+            } else {
+                errs() << "non è un branch\n";
             }
         }
 
         if (Guard) {
-            errs() << "-> rilevato pattern con guardia\n";
+            errs() << "-> CASO 2: pattern con guardia trovato\n";
             return true;
         }
 
@@ -94,51 +112,91 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         return false;
     }
 
-    bool fuse(Loop *firstLoop, Loop *secondLoop, DominatorTree &domTree, LoopInfo &loopInfo) {
-        return false;  // Fusion disabled for debugging
+    bool areControlFlowEquivalent(Loop *L0, Loop *L1, DominatorTree &DT, PostDominatorTree &PDT) {
+        BasicBlock *Pre0 = L0->getLoopPreheader();
+        BasicBlock *Pre1 = L1->getLoopPreheader();
+        BasicBlock *Exit0 = L0->getUniqueExitBlock();
+        BasicBlock *Exit1 = L1->getUniqueExitBlock();
+        
+        if (!Pre0 || !Pre1 || !Exit0 || !Exit1) {
+            errs() << "Control Flow Equivalence Check: blocchi mancanti\n";
+            return false;
+        }
+        
+        bool L0DominatesL1 = DT.dominates(Pre0, Pre1);
+        bool L1PostDominatesL0 = PDT.dominates(Exit1, Exit0);
+        
+        errs() << "flow Equivalence check:\n";
+        errs() << "  L0 domina L1: " << (L0DominatesL1 ? "si" : "no") << "\n";
+        errs() << "  L1 post-domina L0: " << (L1PostDominatesL0 ? "si" : "no") << "\n";
+        
+        if (L0DominatesL1 && L1PostDominatesL0) {
+            errs() << "  -> Loop sono control flow equivalent!\n";
+            return true;
+        }
+        return false;
     }
 
-    PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
-        LI = &AM.getResult<LoopAnalysis>(F);
-        DT = &AM.getResult<DominatorTreeAnalysis>(F);
+    bool fuse(Loop *firstLoop, Loop *secondLoop, DominatorTree &domTree, LoopInfo &loopInfo) {
+        return false;  
+    }
 
-        SmallVector<Loop*, 8> Loops(LI->begin(), LI->end());
-        bool Changed = false;
+    PreservedAnalyses run(Function &function, FunctionAnalysisManager &analysisManager) {
+        errs() << "\n=== Starting function analysis: " << function.getName() << " ===\n";
+        
+        auto &loopInfo = analysisManager.getResult<LoopAnalysis>(function);
+        auto &domTree = analysisManager.getResult<DominatorTreeAnalysis>(function);
+        auto &postDomTree = analysisManager.getResult<PostDominatorTreeAnalysis>(function);
 
-        errs() << "\n=== analizzo " << F.getName() << " ===\n";
-        errs() << "trovati " << Loops.size() << " loop\n";
+        SmallVector<Loop*, 8> topLevelLoops(loopInfo.begin(), loopInfo.end());
+        bool modified = false;
 
-        // analizza coppie di loop adiacenti
-        for (size_t i = 0; i + 1 < Loops.size(); ++i) {
-            Loop *L1 = Loops[i];
-            Loop *L2 = Loops[i + 1];
+        errs() << "Found " << topLevelLoops.size() << " top-level loops\n";
 
-            if (!canFuse(L1, L2)) continue;
-            
-            if (!areLoopsConnected(L1, L2)) {
-                errs() << "-> loop non connessi\n\n";
+        for (size_t i = 0; i + 1 < topLevelLoops.size(); ++i) {
+            Loop *L1 = topLevelLoops[i];
+            Loop *L2 = topLevelLoops[i + 1];
+
+            errs() << "\nCoppia loops -> " << i << " & " << (i+1) << ":\n";
+
+            if (!canFuse(L1, L2)) {
+                errs() << "Loops cannot be fused: missing latch or exit block\n";
                 continue;
             }
 
-            // determina ordine corretto
-            if (areLoopsDirectlyConnected(L2, L1)) {
-                errs() << "-> scambio ordine loop\n";
-                std::swap(L1, L2);
+            if (!areLoopsConnected(L1, L2)) {
+                errs() << "Loops are not directly connected in CFG\n";
+                continue;
             }
 
-            // prova a fondere i loop
-            if (fuse(L1, L2, *DT, *LI)) {
-                errs() << "-> fusione completata\n\n";
-                Changed = true;
-                Loops.erase(Loops.begin() + i + 1);
+            errs() << "Trovati loop adiacenti!\n";
+            
+            //Troviamo ordine loops
+            Loop *firstLoop = L1;
+            Loop *secondLoop = L2;
+            if (areLoopsDirectlyConnected(L2, L1)) {
+                errs() << "Swappo ordine loops!\n";
+                std::swap(firstLoop, secondLoop);
+            }
+
+            // Verifica control flow equivalence dopo aver determinato l'ordine
+            if (!areControlFlowEquivalent(firstLoop, secondLoop, domTree, postDomTree)) {
+                errs() << "Loops are not control flow equivalent\n";
+                continue;
+            }
+
+            if (fuse(firstLoop, secondLoop, domTree, loopInfo)) {
+                errs() << "Fusion successful!\n";
+                modified = true;
+                topLevelLoops.erase(topLevelLoops.begin() + i + 1);
                 --i;
             } else {
-                errs() << "-> fusione fallita\n\n";
+                errs() << "Fusion failed\n";
             }
         }
 
-        errs() << "=== analisi completata ===\n\n";
-        return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+        errs() << "=== Function analysis complete ===\n\n";
+        return modified ? PreservedAnalyses::none() : PreservedAnalyses::all();
     }
 
     static bool isRequired() { return true; }

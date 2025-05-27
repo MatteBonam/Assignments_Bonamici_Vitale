@@ -77,3 +77,41 @@ void test_different_step() {
         b[i] = i + 5;
     }
 }
+
+void test_control_flow_equivalent() {
+    int a[100], b[100];
+    int i;
+    
+    // Questi due loop sono control flow equivalent perché:
+    // 1. Il primo loop domina il secondo (deve essere eseguito prima)
+    // 2. Il secondo loop post-domina il primo (deve essere eseguito dopo)
+    // Non c'è modo di eseguirne solo uno dei due
+    
+    for (i = 0; i < 100; ++i) {
+        a[i] = i * 2;
+    }
+    
+    for (i = 0; i < 100; ++i) {
+        b[i] = a[i] + 5;  // dipende dal primo loop
+    }
+}
+
+void test_not_control_flow_equivalent() {
+    int a[100], b[100];
+    int i;
+    volatile int condition = 1;
+    
+    // Questi loop NON sono control flow equivalent perché:
+    // Il secondo loop potrebbe non essere eseguito (condizione falsa)
+    // Quindi non post-domina il primo
+    
+    for (i = 0; i < 100; ++i) {
+        a[i] = i * 2;
+    }
+    
+    if (condition) {
+        for (i = 0; i < 100; ++i) {
+            b[i] = a[i] + 5;
+        }
+    }
+}

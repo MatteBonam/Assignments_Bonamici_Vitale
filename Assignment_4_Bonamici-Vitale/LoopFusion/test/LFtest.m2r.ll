@@ -333,6 +333,112 @@ define void @test_different_step() #0 {
   ret void
 }
 
+; Function Attrs: noinline nounwind ssp uwtable(sync)
+define void @test_control_flow_equivalent() #0 {
+  %1 = alloca [100 x i32], align 4
+  %2 = alloca [100 x i32], align 4
+  br label %3
+
+3:                                                ; preds = %9, %0
+  %.0 = phi i32 [ 0, %0 ], [ %10, %9 ]
+  %4 = icmp slt i32 %.0, 100
+  br i1 %4, label %5, label %11
+
+5:                                                ; preds = %3
+  %6 = mul nsw i32 %.0, 2
+  %7 = sext i32 %.0 to i64
+  %8 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %7
+  store i32 %6, ptr %8, align 4
+  br label %9
+
+9:                                                ; preds = %5
+  %10 = add nsw i32 %.0, 1
+  br label %3, !llvm.loop !20
+
+11:                                               ; preds = %3
+  br label %12
+
+12:                                               ; preds = %21, %11
+  %.1 = phi i32 [ 0, %11 ], [ %22, %21 ]
+  %13 = icmp slt i32 %.1, 100
+  br i1 %13, label %14, label %23
+
+14:                                               ; preds = %12
+  %15 = sext i32 %.1 to i64
+  %16 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %15
+  %17 = load i32, ptr %16, align 4
+  %18 = add nsw i32 %17, 5
+  %19 = sext i32 %.1 to i64
+  %20 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %19
+  store i32 %18, ptr %20, align 4
+  br label %21
+
+21:                                               ; preds = %14
+  %22 = add nsw i32 %.1, 1
+  br label %12, !llvm.loop !21
+
+23:                                               ; preds = %12
+  ret void
+}
+
+; Function Attrs: noinline nounwind ssp uwtable(sync)
+define void @test_not_control_flow_equivalent() #0 {
+  %1 = alloca [100 x i32], align 4
+  %2 = alloca [100 x i32], align 4
+  %3 = alloca i32, align 4
+  store volatile i32 1, ptr %3, align 4
+  br label %4
+
+4:                                                ; preds = %10, %0
+  %.0 = phi i32 [ 0, %0 ], [ %11, %10 ]
+  %5 = icmp slt i32 %.0, 100
+  br i1 %5, label %6, label %12
+
+6:                                                ; preds = %4
+  %7 = mul nsw i32 %.0, 2
+  %8 = sext i32 %.0 to i64
+  %9 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %8
+  store i32 %7, ptr %9, align 4
+  br label %10
+
+10:                                               ; preds = %6
+  %11 = add nsw i32 %.0, 1
+  br label %4, !llvm.loop !22
+
+12:                                               ; preds = %4
+  %13 = load volatile i32, ptr %3, align 4
+  %14 = icmp ne i32 %13, 0
+  br i1 %14, label %15, label %28
+
+15:                                               ; preds = %12
+  br label %16
+
+16:                                               ; preds = %25, %15
+  %.1 = phi i32 [ 0, %15 ], [ %26, %25 ]
+  %17 = icmp slt i32 %.1, 100
+  br i1 %17, label %18, label %27
+
+18:                                               ; preds = %16
+  %19 = sext i32 %.1 to i64
+  %20 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %19
+  %21 = load i32, ptr %20, align 4
+  %22 = add nsw i32 %21, 5
+  %23 = sext i32 %.1 to i64
+  %24 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %23
+  store i32 %22, ptr %24, align 4
+  br label %25
+
+25:                                               ; preds = %18
+  %26 = add nsw i32 %.1, 1
+  br label %16, !llvm.loop !23
+
+27:                                               ; preds = %16
+  br label %28
+
+28:                                               ; preds = %27, %12
+  ret void
+}
+
 attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="apple-m1" "target-features"="+aes,+altnzcv,+ccdp,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+fp16fml,+fptoint,+fullfp16,+jsconv,+lse,+neon,+pauth,+perfmon,+predres,+ras,+rcpc,+rdm,+sb,+sha2,+sha3,+specrestrict,+ssbs,+v8.1a,+v8.2a,+v8.3a,+v8.4a,+v8a,+zcm,+zcz" }
 
 !llvm.module.flags = !{!0, !1, !2, !3, !4}
@@ -358,3 +464,7 @@ attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf"
 !17 = distinct !{!17, !7}
 !18 = distinct !{!18, !7}
 !19 = distinct !{!19, !7}
+!20 = distinct !{!20, !7}
+!21 = distinct !{!21, !7}
+!22 = distinct !{!22, !7}
+!23 = distinct !{!23, !7}
