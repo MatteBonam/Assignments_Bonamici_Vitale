@@ -152,7 +152,7 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
 
     Value* findBaseIndexExpression(Value *V) {
         if (Instruction *I = dyn_cast<Instruction>(V)) {
-            // Se è un'istruzione di cast (come sext), guarda l'operando
+            // Se è un'istruzione di cast guarda l'operando
             if (CastInst *Cast = dyn_cast<CastInst>(I)) {
                 return findBaseIndexExpression(Cast->getOperand(0));
             }
@@ -167,37 +167,25 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
     bool areNegDistance(Loop *L1, Loop *L2) {
         errs() << "\n=== Analisi dipendenze negative ===\n";
         
-        for (BasicBlock *BB1 : L1->getBlocks()) {
-            for (Instruction &I1 : *BB1) {
-                if (StoreInst *Store = dyn_cast<StoreInst>(&I1)) {
-                    for (BasicBlock *BB2 : L2->getBlocks()) {
-                        for (Instruction &I2 : *BB2) {
-                            if (LoadInst *Load = dyn_cast<LoadInst>(&I2)) {
-                                if (GetElementPtrInst *StoreGEP = dyn_cast<GetElementPtrInst>(Store->getPointerOperand())) {
-                                    if (GetElementPtrInst *LoadGEP = dyn_cast<GetElementPtrInst>(Load->getPointerOperand())) {
-                                        // verifica se operano sullo stesso array 
-                                        if (StoreGEP->getPointerOperand() == LoadGEP->getPointerOperand()) {
-                                            Value *LoadIdx = LoadGEP->getOperand(LoadGEP->getNumOperands()-1);
-                                            Value *BaseExpr = findBaseIndexExpression(LoadIdx);
-                                            
-                                            // se l'indice è un'espressione add/sub
-                                            if (BinaryOperator *BinOp = dyn_cast<BinaryOperator>(BaseExpr)) {
-                                                if (BinOp->getOpcode() == Instruction::Add) {
-                                                    Value *Op1 = BinOp->getOperand(0);
-                                                    Value *Op2 = BinOp->getOperand(1);
-                                                    
-                                                    if (ConstantInt *Const = dyn_cast<ConstantInt>(Op2)) {
-                                                        // se la costante è positiva, abbiamo una dipendenza negativa
-                                                        if (Const->getSExtValue() > 0) {
-                                                            errs() << "Trovata dipendenza negativa: accesso a[i+" 
-                                                                   << Const->getSExtValue() << "]\n";
-                                                            return true;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+        for (BasicBlock *BB : L2->getBlocks()) {
+            for (Instruction &I : *BB) {
+                if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(&I)) {
+                    // prendo l'indice (ultimo operando del GEP)
+                    Value *Index = GEP->getOperand(GEP->getNumOperands()-1);
+                    
+                    // se l'indice viene da un cast guardo l'operando 
+                    if (CastInst *Cast = dyn_cast<CastInst>(Index)) {
+                        Index = Cast->getOperand(0);
+                    }
+                    
+                    // controllo se è una add con costante positiva
+                    if (BinaryOperator *Add = dyn_cast<BinaryOperator>(Index)) {
+                        if (Add->getOpcode() == Instruction::Add) {
+                            if (ConstantInt *Const = dyn_cast<ConstantInt>(Add->getOperand(1))) {
+                                if (Const->getSExtValue() > 0) {
+                                    errs() << "Trovata dipendenza negativa: accesso a[i+" 
+                                           << Const->getSExtValue() << "]\n";
+                                    return true;
                                 }
                             }
                         }
@@ -263,7 +251,6 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
             return false;
         }
 
-        // Debug della sostituzione delle variabili
         errs() << "\n=== debug sostituzione variabile induzione ===\n";
         errs() << "indVar1: " << *IndVar1 << "\n";
         errs() << "indVar2: " << *IndVar2 << "\n";
@@ -290,7 +277,7 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
             }
         }
 
-        // Trasformazione CFG secondo schema
+        // trasformazione CFG
         errs() << "\ntrasformazione CFG:\n";
 
         // HeaderLoop1 -> L2Exit
