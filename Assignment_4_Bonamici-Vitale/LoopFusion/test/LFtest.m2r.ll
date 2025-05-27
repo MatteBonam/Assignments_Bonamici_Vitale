@@ -439,6 +439,55 @@ define void @test_not_control_flow_equivalent() #0 {
   ret void
 }
 
+; Function Attrs: noinline nounwind ssp uwtable(sync)
+define void @test_negative_distance() #0 {
+  %1 = alloca [100 x i32], align 4
+  %2 = alloca [100 x i32], align 4
+  br label %3
+
+3:                                                ; preds = %9, %0
+  %.0 = phi i32 [ 0, %0 ], [ %10, %9 ]
+  %4 = icmp slt i32 %.0, 98
+  br i1 %4, label %5, label %11
+
+5:                                                ; preds = %3
+  %6 = mul nsw i32 %.0, 2
+  %7 = sext i32 %.0 to i64
+  %8 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %7
+  store i32 %6, ptr %8, align 4
+  br label %9
+
+9:                                                ; preds = %5
+  %10 = add nsw i32 %.0, 1
+  br label %3, !llvm.loop !24
+
+11:                                               ; preds = %3
+  br label %12
+
+12:                                               ; preds = %22, %11
+  %.01 = phi i32 [ 0, %11 ], [ %23, %22 ]
+  %13 = icmp slt i32 %.01, 98
+  br i1 %13, label %14, label %24
+
+14:                                               ; preds = %12
+  %15 = add nsw i32 %.01, 3
+  %16 = sext i32 %15 to i64
+  %17 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %16
+  %18 = load i32, ptr %17, align 4
+  %19 = add nsw i32 %18, 1
+  %20 = sext i32 %.01 to i64
+  %21 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %20
+  store i32 %19, ptr %21, align 4
+  br label %22
+
+22:                                               ; preds = %14
+  %23 = add nsw i32 %.01, 1
+  br label %12, !llvm.loop !25
+
+24:                                               ; preds = %12
+  ret void
+}
+
 attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="apple-m1" "target-features"="+aes,+altnzcv,+ccdp,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+fp16fml,+fptoint,+fullfp16,+jsconv,+lse,+neon,+pauth,+perfmon,+predres,+ras,+rcpc,+rdm,+sb,+sha2,+sha3,+specrestrict,+ssbs,+v8.1a,+v8.2a,+v8.3a,+v8.4a,+v8a,+zcm,+zcz" }
 
 !llvm.module.flags = !{!0, !1, !2, !3, !4}
@@ -468,3 +517,5 @@ attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf"
 !21 = distinct !{!21, !7}
 !22 = distinct !{!22, !7}
 !23 = distinct !{!23, !7}
+!24 = distinct !{!24, !7}
+!25 = distinct !{!25, !7}

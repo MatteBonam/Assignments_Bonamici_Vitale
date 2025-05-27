@@ -541,6 +541,67 @@ define void @test_not_control_flow_equivalent() #0 {
   ret void
 }
 
+; Function Attrs: noinline nounwind ssp uwtable(sync)
+define void @test_negative_distance() #0 {
+  %1 = alloca [100 x i32], align 4
+  %2 = alloca [100 x i32], align 4
+  %3 = alloca i32, align 4
+  %4 = alloca i32, align 4
+  store i32 0, ptr %3, align 4
+  br label %5
+
+5:                                                ; preds = %14, %0
+  %6 = load i32, ptr %3, align 4
+  %7 = icmp slt i32 %6, 98
+  br i1 %7, label %8, label %17
+
+8:                                                ; preds = %5
+  %9 = load i32, ptr %3, align 4
+  %10 = mul nsw i32 %9, 2
+  %11 = load i32, ptr %3, align 4
+  %12 = sext i32 %11 to i64
+  %13 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %12
+  store i32 %10, ptr %13, align 4
+  br label %14
+
+14:                                               ; preds = %8
+  %15 = load i32, ptr %3, align 4
+  %16 = add nsw i32 %15, 1
+  store i32 %16, ptr %3, align 4
+  br label %5, !llvm.loop !24
+
+17:                                               ; preds = %5
+  store i32 0, ptr %4, align 4
+  br label %18
+
+18:                                               ; preds = %31, %17
+  %19 = load i32, ptr %4, align 4
+  %20 = icmp slt i32 %19, 98
+  br i1 %20, label %21, label %34
+
+21:                                               ; preds = %18
+  %22 = load i32, ptr %4, align 4
+  %23 = add nsw i32 %22, 3
+  %24 = sext i32 %23 to i64
+  %25 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %24
+  %26 = load i32, ptr %25, align 4
+  %27 = add nsw i32 %26, 1
+  %28 = load i32, ptr %4, align 4
+  %29 = sext i32 %28 to i64
+  %30 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %29
+  store i32 %27, ptr %30, align 4
+  br label %31
+
+31:                                               ; preds = %21
+  %32 = load i32, ptr %4, align 4
+  %33 = add nsw i32 %32, 1
+  store i32 %33, ptr %4, align 4
+  br label %18, !llvm.loop !25
+
+34:                                               ; preds = %18
+  ret void
+}
+
 attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="apple-m1" "target-features"="+aes,+altnzcv,+ccdp,+ccidx,+complxnum,+crc,+dit,+dotprod,+flagm,+fp-armv8,+fp16fml,+fptoint,+fullfp16,+jsconv,+lse,+neon,+pauth,+perfmon,+predres,+ras,+rcpc,+rdm,+sb,+sha2,+sha3,+specrestrict,+ssbs,+v8.1a,+v8.2a,+v8.3a,+v8.4a,+v8a,+zcm,+zcz" }
 
 !llvm.module.flags = !{!0, !1, !2, !3, !4}
@@ -570,3 +631,5 @@ attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf"
 !21 = distinct !{!21, !7}
 !22 = distinct !{!22, !7}
 !23 = distinct !{!23, !7}
+!24 = distinct !{!24, !7}
+!25 = distinct !{!25, !7}

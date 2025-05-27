@@ -115,3 +115,16 @@ void test_not_control_flow_equivalent() {
         }
     }
 }
+
+void test_negative_distance() {
+    int a[100];
+    int b[100];
+
+    for (int i = 0; i < 98; ++i) {
+        a[i] = i * 2; 
+    }
+   
+    for (int i = 0; i < 98; ++i) {
+        b[i] = a[i+3] + 1;  
+    }
+}

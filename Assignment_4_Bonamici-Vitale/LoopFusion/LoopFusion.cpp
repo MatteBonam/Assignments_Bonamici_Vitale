@@ -150,8 +150,190 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
         return false;
     }
 
-    bool fuse(Loop *firstLoop, Loop *secondLoop, DominatorTree &domTree, LoopInfo &loopInfo) {
-        return false;  
+    Value* findBaseIndexExpression(Value *V) {
+        if (Instruction *I = dyn_cast<Instruction>(V)) {
+            // Se è un'istruzione di cast (come sext), guarda l'operando
+            if (CastInst *Cast = dyn_cast<CastInst>(I)) {
+                return findBaseIndexExpression(Cast->getOperand(0));
+            }
+            // Se è un'operazione binaria, ritornala
+            if (BinaryOperator *BinOp = dyn_cast<BinaryOperator>(I)) {
+                return BinOp;
+            }
+        }
+        return V;
+    }
+
+    bool areNegDistance(Loop *L1, Loop *L2) {
+        errs() << "\n=== Analisi dipendenze negative ===\n";
+        
+        for (BasicBlock *BB1 : L1->getBlocks()) {
+            for (Instruction &I1 : *BB1) {
+                if (StoreInst *Store = dyn_cast<StoreInst>(&I1)) {
+                    for (BasicBlock *BB2 : L2->getBlocks()) {
+                        for (Instruction &I2 : *BB2) {
+                            if (LoadInst *Load = dyn_cast<LoadInst>(&I2)) {
+                                if (GetElementPtrInst *StoreGEP = dyn_cast<GetElementPtrInst>(Store->getPointerOperand())) {
+                                    if (GetElementPtrInst *LoadGEP = dyn_cast<GetElementPtrInst>(Load->getPointerOperand())) {
+                                        // verifica se operano sullo stesso array 
+                                        if (StoreGEP->getPointerOperand() == LoadGEP->getPointerOperand()) {
+                                            Value *LoadIdx = LoadGEP->getOperand(LoadGEP->getNumOperands()-1);
+                                            Value *BaseExpr = findBaseIndexExpression(LoadIdx);
+                                            
+                                            // se l'indice è un'espressione add/sub
+                                            if (BinaryOperator *BinOp = dyn_cast<BinaryOperator>(BaseExpr)) {
+                                                if (BinOp->getOpcode() == Instruction::Add) {
+                                                    Value *Op1 = BinOp->getOperand(0);
+                                                    Value *Op2 = BinOp->getOperand(1);
+                                                    
+                                                    if (ConstantInt *Const = dyn_cast<ConstantInt>(Op2)) {
+                                                        // se la costante è positiva, abbiamo una dipendenza negativa
+                                                        if (Const->getSExtValue() > 0) {
+                                                            errs() << "Trovata dipendenza negativa: accesso a[i+" 
+                                                                   << Const->getSExtValue() << "]\n";
+                                                            return true;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    bool fuse(Loop *firstLoop, Loop *secondLoop, DominatorTree &DT, LoopInfo &LI) {
+        BasicBlock *Header1 = firstLoop->getHeader();
+        BasicBlock *Body1 = firstLoop->getLoopLatch();
+        BasicBlock *Exit1 = firstLoop->getUniqueExitBlock();
+        BasicBlock *Pre1 = firstLoop->getLoopPreheader();
+        BasicBlock *Header2 = secondLoop->getHeader();
+        BasicBlock *Body2 = secondLoop->getLoopLatch();
+        BasicBlock *Exit2 = secondLoop->getUniqueExitBlock();
+        
+        if (!Header1 || !Body1 || !Exit1 || !Pre1 || !Header2 || !Body2 || !Exit2) {
+            errs() << "Blocchi necessari mancanti per la fusione\n";
+            return false;
+        }
+
+        // variabili di induzione
+        PHINode *Ind1 = nullptr;
+        PHINode *Ind2 = nullptr;
+        Value *StepVal = nullptr;
+        
+        // PHI nodes header
+        for (PHINode &PHI : Header1->phis()) {
+            // se è una PHI node che incrementa di 1, è probabilmente la nostra variabile di induzione
+            if (auto *IncInst = dyn_cast<BinaryOperator>(PHI.getIncomingValueForBlock(Body1))) {
+                if (IncInst->getOpcode() == Instruction::Add) {
+                    if (auto *Const = dyn_cast<ConstantInt>(IncInst->getOperand(1))) {
+                        if (Const->getValue() == 1) {
+                            Ind1 = &PHI;
+                            StepVal = IncInst;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        for (PHINode &PHI : Header2->phis()) {
+            if (auto *IncInst = dyn_cast<BinaryOperator>(PHI.getIncomingValueForBlock(Body2))) {
+                if (IncInst->getOpcode() == Instruction::Add) {
+                    if (auto *Const = dyn_cast<ConstantInt>(IncInst->getOperand(1))) {
+                        if (Const->getValue() == 1) {
+                            Ind2 = &PHI;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (!Ind1 || !Ind2) {
+            errs() << "Variabili di induzione non trovate\n";
+            return false;
+        }
+
+        errs() << "Trovate variabili di induzione:\n";
+        errs() << "  Loop1: " << *Ind1 << "\n";
+        errs() << "  Loop2: " << *Ind2 << "\n";
+
+        // sostituzione usi della variabile di induzione del secondo loop nel suo body
+        for (Instruction &I : *Body2) {
+            for (unsigned i = 0; i < I.getNumOperands(); ++i) {
+                if (I.getOperand(i) == Ind2) {
+                    I.setOperand(i, Ind1);
+                }
+            }
+        }
+
+        // 3. Modifica il CFG:
+        // - Il body del primo loop deve saltare al body del secondo
+        // - Il body del secondo loop deve saltare al header del primo
+        // - Il header del primo loop deve saltare all'exit del secondo quando finisce
+        
+        // Modifica il branch del header1 per saltare a Exit2
+        BranchInst *HeaderTerm1 = dyn_cast<BranchInst>(Header1->getTerminator());
+        if (!HeaderTerm1) {
+            errs() << "Terminatore dell'header del primo loop non trovato\n";
+            return false;
+        }
+        
+        Value *Cond = nullptr;
+        if (HeaderTerm1->isConditional()) {
+            Cond = HeaderTerm1->getCondition();
+        }
+        HeaderTerm1->eraseFromParent();
+        
+        if (Cond) {
+            BranchInst::Create(Body1, Exit2, Cond, Header1);
+        } else {
+            BranchInst::Create(Body1, Header1);
+        }
+
+        // Modifica il branch del body1 per saltare al body2
+        BranchInst *Term1 = dyn_cast<BranchInst>(Body1->getTerminator());
+        if (!Term1) {
+            errs() << "Terminatore del primo body non trovato\n";
+            return false;
+        }
+        Term1->eraseFromParent();
+        BranchInst::Create(Body2, Body1);
+
+        // Modifica il branch del body2 per saltare al header1
+        BranchInst *Term2 = dyn_cast<BranchInst>(Body2->getTerminator());
+        if (!Term2) {
+            errs() << "Terminatore del secondo body non trovato\n";
+            return false;
+        }
+        Term2->eraseFromParent();
+        BranchInst::Create(Header1, Body2);
+
+        // 4. Aggiorna la PHI node del primo loop per riflettere il nuovo CFG
+        Value *InitVal = Ind1->getIncomingValueForBlock(Pre1);
+        Ind1->removeIncomingValue(Body1);
+        Ind1->addIncoming(StepVal, Body2);
+
+        // 5. Rimuovi la PHI node del secondo loop
+        Ind2->replaceAllUsesWith(UndefValue::get(Ind2->getType()));
+        Ind2->eraseFromParent();
+
+        // 6. Aggiorna il DominatorTree
+        DT.recalculate(*firstLoop->getHeader()->getParent());
+
+        errs() << "Fusione completata con nuovo pattern:\n";
+        errs() << "  - Header1 -> Exit2\n";
+        errs() << "  - Body1 -> Body2\n";
+        errs() << "  - Body2 -> Header1\n";
+        
+        return true;
     }
 
     PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
@@ -202,8 +384,13 @@ struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
                 continue;
             }
 
+            if (areNegDistance(first, second)) {
+                errs() << "Dipendenza negativa trovata tra i loop\n";
+                continue;
+            }
+
             if (fuse(first, second, DT, LI)) {
-                errs() << "Fusion successful!\n";
+                errs() << "FUSIONE RIUSCITA!\n";
                 modified = true;
                 topLevelLoops.erase(topLevelLoops.begin() + i + 1);
                 --i;

@@ -39,42 +39,41 @@ define void @test_fusion_direct() #0 {
   %2 = alloca [100 x i32], align 4
   br label %3
 
-3:                                                ; preds = %9, %0
-  %.0 = phi i32 [ 0, %0 ], [ %10, %9 ]
+3:                                                ; preds = %18, %0
+  %.0 = phi i32 [ 0, %0 ], [ %10, %18 ]
   %4 = icmp slt i32 %.0, 100
-  br i1 %4, label %5, label %11
+  br i1 %4, label %9, label %20
 
-5:                                                ; preds = %3
+5:                                                ; No predecessors!
   %6 = mul nsw i32 %.0, 2
   %7 = sext i32 %.0 to i64
   %8 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %7
   store i32 %6, ptr %8, align 4
   br label %9
 
-9:                                                ; preds = %5
+9:                                                ; preds = %3, %5
   %10 = add nsw i32 %.0, 1
-  br label %3, !llvm.loop !8
+  br label %18
 
-11:                                               ; preds = %3
+11:                                               ; No predecessors!
   br label %12
 
-12:                                               ; preds = %18, %11
-  %.01 = phi i32 [ 0, %11 ], [ %19, %18 ]
-  %13 = icmp slt i32 %.01, 100
+12:                                               ; preds = %11
+  %13 = icmp slt i32 undef, 100
   br i1 %13, label %14, label %20
 
 14:                                               ; preds = %12
-  %15 = add nsw i32 %.01, 5
-  %16 = sext i32 %.01 to i64
+  %15 = add nsw i32 undef, 5
+  %16 = sext i32 undef to i64
   %17 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %16
   store i32 %15, ptr %17, align 4
   br label %18
 
-18:                                               ; preds = %14
-  %19 = add nsw i32 %.01, 1
-  br label %12, !llvm.loop !9
+18:                                               ; preds = %9, %14
+  %19 = add nsw i32 %.0, 1
+  br label %3
 
-20:                                               ; preds = %12
+20:                                               ; preds = %3, %12
   ret void
 }
 
@@ -105,7 +104,7 @@ define void @test_guard_case() #0 {
 
 13:                                               ; preds = %9
   %14 = add nsw i32 %.0, 1
-  br label %7, !llvm.loop !10
+  br label %7, !llvm.loop !8
 
 15:                                               ; preds = %7
   br label %26
@@ -127,7 +126,7 @@ define void @test_guard_case() #0 {
 
 23:                                               ; preds = %19
   %24 = add nsw i32 %.01, 1
-  br label %17, !llvm.loop !11
+  br label %17, !llvm.loop !9
 
 25:                                               ; preds = %17
   br label %26
@@ -156,7 +155,7 @@ define void @test_non_adjacent() #0 {
 
 9:                                                ; preds = %5
   %10 = add nsw i32 %.0, 1
-  br label %3, !llvm.loop !12
+  br label %3, !llvm.loop !10
 
 11:                                               ; preds = %3
   %12 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 0
@@ -191,7 +190,7 @@ define void @test_non_adjacent() #0 {
 
 26:                                               ; preds = %22
   %27 = add nsw i32 %.01, 1
-  br label %20, !llvm.loop !13
+  br label %20, !llvm.loop !11
 
 28:                                               ; preds = %20
   ret void
@@ -217,7 +216,7 @@ define void @test_different_bounds() #0 {
 
 9:                                                ; preds = %5
   %10 = add nsw i32 %.0, 1
-  br label %3, !llvm.loop !14
+  br label %3, !llvm.loop !12
 
 11:                                               ; preds = %3
   br label %12
@@ -236,7 +235,7 @@ define void @test_different_bounds() #0 {
 
 18:                                               ; preds = %14
   %19 = add nsw i32 %.01, 1
-  br label %12, !llvm.loop !15
+  br label %12, !llvm.loop !13
 
 20:                                               ; preds = %12
   ret void
@@ -262,7 +261,7 @@ define void @test_different_types() #0 {
 
 9:                                                ; preds = %5
   %10 = add nsw i32 %.0, 1
-  br label %3, !llvm.loop !16
+  br label %3, !llvm.loop !14
 
 11:                                               ; preds = %3
   br label %12
@@ -282,7 +281,7 @@ define void @test_different_types() #0 {
 
 19:                                               ; preds = %14
   %20 = fadd double %.01, 1.000000e+00
-  br label %12, !llvm.loop !17
+  br label %12, !llvm.loop !15
 
 21:                                               ; preds = %12
   ret void
@@ -308,7 +307,7 @@ define void @test_different_step() #0 {
 
 9:                                                ; preds = %5
   %10 = add nsw i32 %.0, 1
-  br label %3, !llvm.loop !18
+  br label %3, !llvm.loop !16
 
 11:                                               ; preds = %3
   br label %12
@@ -327,7 +326,7 @@ define void @test_different_step() #0 {
 
 18:                                               ; preds = %14
   %19 = add nsw i32 %.01, 2
-  br label %12, !llvm.loop !19
+  br label %12, !llvm.loop !17
 
 20:                                               ; preds = %12
   ret void
@@ -339,45 +338,44 @@ define void @test_control_flow_equivalent() #0 {
   %2 = alloca [100 x i32], align 4
   br label %3
 
-3:                                                ; preds = %9, %0
-  %.0 = phi i32 [ 0, %0 ], [ %10, %9 ]
+3:                                                ; preds = %21, %0
+  %.0 = phi i32 [ 0, %0 ], [ %10, %21 ]
   %4 = icmp slt i32 %.0, 100
-  br i1 %4, label %5, label %11
+  br i1 %4, label %9, label %23
 
-5:                                                ; preds = %3
+5:                                                ; No predecessors!
   %6 = mul nsw i32 %.0, 2
   %7 = sext i32 %.0 to i64
   %8 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %7
   store i32 %6, ptr %8, align 4
   br label %9
 
-9:                                                ; preds = %5
+9:                                                ; preds = %3, %5
   %10 = add nsw i32 %.0, 1
-  br label %3, !llvm.loop !20
+  br label %21
 
-11:                                               ; preds = %3
+11:                                               ; No predecessors!
   br label %12
 
-12:                                               ; preds = %21, %11
-  %.1 = phi i32 [ 0, %11 ], [ %22, %21 ]
-  %13 = icmp slt i32 %.1, 100
+12:                                               ; preds = %11
+  %13 = icmp slt i32 undef, 100
   br i1 %13, label %14, label %23
 
 14:                                               ; preds = %12
-  %15 = sext i32 %.1 to i64
+  %15 = sext i32 undef to i64
   %16 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %15
   %17 = load i32, ptr %16, align 4
   %18 = add nsw i32 %17, 5
-  %19 = sext i32 %.1 to i64
+  %19 = sext i32 undef to i64
   %20 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %19
   store i32 %18, ptr %20, align 4
   br label %21
 
-21:                                               ; preds = %14
-  %22 = add nsw i32 %.1, 1
-  br label %12, !llvm.loop !21
+21:                                               ; preds = %9, %14
+  %22 = add nsw i32 %.0, 1
+  br label %3
 
-23:                                               ; preds = %12
+23:                                               ; preds = %3, %12
   ret void
 }
 
@@ -403,7 +401,7 @@ define void @test_not_control_flow_equivalent() #0 {
 
 10:                                               ; preds = %6
   %11 = add nsw i32 %.0, 1
-  br label %4, !llvm.loop !22
+  br label %4, !llvm.loop !18
 
 12:                                               ; preds = %4
   %13 = load volatile i32, ptr %3, align 4
@@ -430,12 +428,61 @@ define void @test_not_control_flow_equivalent() #0 {
 
 25:                                               ; preds = %18
   %26 = add nsw i32 %.1, 1
-  br label %16, !llvm.loop !23
+  br label %16, !llvm.loop !19
 
 27:                                               ; preds = %16
   br label %28
 
 28:                                               ; preds = %27, %12
+  ret void
+}
+
+; Function Attrs: noinline nounwind ssp uwtable(sync)
+define void @test_negative_distance() #0 {
+  %1 = alloca [100 x i32], align 4
+  %2 = alloca [100 x i32], align 4
+  br label %3
+
+3:                                                ; preds = %9, %0
+  %.0 = phi i32 [ 0, %0 ], [ %10, %9 ]
+  %4 = icmp slt i32 %.0, 98
+  br i1 %4, label %5, label %11
+
+5:                                                ; preds = %3
+  %6 = mul nsw i32 %.0, 2
+  %7 = sext i32 %.0 to i64
+  %8 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %7
+  store i32 %6, ptr %8, align 4
+  br label %9
+
+9:                                                ; preds = %5
+  %10 = add nsw i32 %.0, 1
+  br label %3, !llvm.loop !20
+
+11:                                               ; preds = %3
+  br label %12
+
+12:                                               ; preds = %22, %11
+  %.01 = phi i32 [ 0, %11 ], [ %23, %22 ]
+  %13 = icmp slt i32 %.01, 98
+  br i1 %13, label %14, label %24
+
+14:                                               ; preds = %12
+  %15 = add nsw i32 %.01, 3
+  %16 = sext i32 %15 to i64
+  %17 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %16
+  %18 = load i32, ptr %17, align 4
+  %19 = add nsw i32 %18, 1
+  %20 = sext i32 %.01 to i64
+  %21 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %20
+  store i32 %19, ptr %21, align 4
+  br label %22
+
+22:                                               ; preds = %14
+  %23 = add nsw i32 %.01, 1
+  br label %12, !llvm.loop !21
+
+24:                                               ; preds = %12
   ret void
 }
 
@@ -466,5 +513,3 @@ attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf"
 !19 = distinct !{!19, !7}
 !20 = distinct !{!20, !7}
 !21 = distinct !{!21, !7}
-!22 = distinct !{!22, !7}
-!23 = distinct !{!23, !7}
