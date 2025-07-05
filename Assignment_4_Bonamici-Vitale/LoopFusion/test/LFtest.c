@@ -1,12 +1,4 @@
-void test_no_fusion() {
-    int a[100], b[100];
-    for (int i = 0; i < 100; ++i) {
-        a[i] = i * 2;
-        b[i] = i + 5;
-    }
-}
-
-void test_fusion_direct() {
+void test_fusion() {
     int a[100], b[100];
     for (int i = 0; i < 100; ++i) {
         a[i] = i * 2;
@@ -15,22 +7,6 @@ void test_fusion_direct() {
         b[i] = i + 5;
     }
 }
-
-void test_guard_case() {
-    int a[100], b[100];
-    volatile int condition = 1;
-    
-    if (condition) {
-        for (int i = 0; i < 100; ++i) {
-            a[i] = i * 2;
-        }
-    } else {
-        for (int i = 0; i < 100; ++i) {
-            b[i] = i + 5;
-        }
-    }
-}
-
 
 void test_non_adjacent() {
     int a[100], b[100];
@@ -78,23 +54,6 @@ void test_different_step() {
     }
 }
 
-void test_control_flow_equivalent() {
-    int a[100], b[100];
-    int i;
-    
-    // Questi due loop sono control flow equivalent perché:
-    // 1. Il primo loop domina il secondo (deve essere eseguito prima)
-    // 2. Il secondo loop post-domina il primo (deve essere eseguito dopo)
-    // Non c'è modo di eseguirne solo uno dei due
-    
-    for (i = 0; i < 100; ++i) {
-        a[i] = i * 2;
-    }
-    
-    for (i = 0; i < 100; ++i) {
-        b[i] = a[i] + 5;  // dipende dal primo loop
-    }
-}
 
 void test_not_control_flow_equivalent() {
     int a[100], b[100];
@@ -126,5 +85,18 @@ void test_negative_distance() {
    
     for (int i = 0; i < 98; ++i) {
         b[i] = a[i+3] + 1;  
+    }
+}
+
+void test_good_distance() {
+    int a[100];
+    int b[100];
+
+    for (int i = 0; i < 98; ++i) {
+        a[i] = i * 2; 
+    }
+   
+    for (int i = 0; i < 98; ++i) {
+        b[i] = a[i] + 1;  
     }
 }

@@ -4,45 +4,7 @@ target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128-Fn32"
 target triple = "arm64-apple-macosx15.0.0"
 
 ; Function Attrs: noinline nounwind ssp uwtable(sync)
-define void @test_no_fusion() #0 {
-  %1 = alloca [100 x i32], align 4
-  %2 = alloca [100 x i32], align 4
-  %3 = alloca i32, align 4
-  store i32 0, ptr %3, align 4
-  br label %4
-
-4:                                                ; preds = %18, %0
-  %5 = load i32, ptr %3, align 4
-  %6 = icmp slt i32 %5, 100
-  br i1 %6, label %7, label %21
-
-7:                                                ; preds = %4
-  %8 = load i32, ptr %3, align 4
-  %9 = mul nsw i32 %8, 2
-  %10 = load i32, ptr %3, align 4
-  %11 = sext i32 %10 to i64
-  %12 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %11
-  store i32 %9, ptr %12, align 4
-  %13 = load i32, ptr %3, align 4
-  %14 = add nsw i32 %13, 5
-  %15 = load i32, ptr %3, align 4
-  %16 = sext i32 %15 to i64
-  %17 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %16
-  store i32 %14, ptr %17, align 4
-  br label %18
-
-18:                                               ; preds = %7
-  %19 = load i32, ptr %3, align 4
-  %20 = add nsw i32 %19, 1
-  store i32 %20, ptr %3, align 4
-  br label %4, !llvm.loop !6
-
-21:                                               ; preds = %4
-  ret void
-}
-
-; Function Attrs: noinline nounwind ssp uwtable(sync)
-define void @test_fusion_direct() #0 {
+define void @test_fusion() #0 {
   %1 = alloca [100 x i32], align 4
   %2 = alloca [100 x i32], align 4
   %3 = alloca i32, align 4
@@ -68,7 +30,7 @@ define void @test_fusion_direct() #0 {
   %15 = load i32, ptr %3, align 4
   %16 = add nsw i32 %15, 1
   store i32 %16, ptr %3, align 4
-  br label %5, !llvm.loop !8
+  br label %5, !llvm.loop !6
 
 17:                                               ; preds = %5
   store i32 0, ptr %4, align 4
@@ -92,79 +54,9 @@ define void @test_fusion_direct() #0 {
   %28 = load i32, ptr %4, align 4
   %29 = add nsw i32 %28, 1
   store i32 %29, ptr %4, align 4
-  br label %18, !llvm.loop !9
+  br label %18, !llvm.loop !8
 
 30:                                               ; preds = %18
-  ret void
-}
-
-; Function Attrs: noinline nounwind ssp uwtable(sync)
-define void @test_guard_case() #0 {
-  %1 = alloca [100 x i32], align 4
-  %2 = alloca [100 x i32], align 4
-  %3 = alloca i32, align 4
-  %4 = alloca i32, align 4
-  %5 = alloca i32, align 4
-  store volatile i32 1, ptr %3, align 4
-  %6 = load volatile i32, ptr %3, align 4
-  %7 = icmp ne i32 %6, 0
-  br i1 %7, label %8, label %22
-
-8:                                                ; preds = %0
-  store i32 0, ptr %4, align 4
-  br label %9
-
-9:                                                ; preds = %18, %8
-  %10 = load i32, ptr %4, align 4
-  %11 = icmp slt i32 %10, 100
-  br i1 %11, label %12, label %21
-
-12:                                               ; preds = %9
-  %13 = load i32, ptr %4, align 4
-  %14 = mul nsw i32 %13, 2
-  %15 = load i32, ptr %4, align 4
-  %16 = sext i32 %15 to i64
-  %17 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %16
-  store i32 %14, ptr %17, align 4
-  br label %18
-
-18:                                               ; preds = %12
-  %19 = load i32, ptr %4, align 4
-  %20 = add nsw i32 %19, 1
-  store i32 %20, ptr %4, align 4
-  br label %9, !llvm.loop !10
-
-21:                                               ; preds = %9
-  br label %36
-
-22:                                               ; preds = %0
-  store i32 0, ptr %5, align 4
-  br label %23
-
-23:                                               ; preds = %32, %22
-  %24 = load i32, ptr %5, align 4
-  %25 = icmp slt i32 %24, 100
-  br i1 %25, label %26, label %35
-
-26:                                               ; preds = %23
-  %27 = load i32, ptr %5, align 4
-  %28 = add nsw i32 %27, 5
-  %29 = load i32, ptr %5, align 4
-  %30 = sext i32 %29 to i64
-  %31 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %30
-  store i32 %28, ptr %31, align 4
-  br label %32
-
-32:                                               ; preds = %26
-  %33 = load i32, ptr %5, align 4
-  %34 = add nsw i32 %33, 1
-  store i32 %34, ptr %5, align 4
-  br label %23, !llvm.loop !11
-
-35:                                               ; preds = %23
-  br label %36
-
-36:                                               ; preds = %35, %21
   ret void
 }
 
@@ -195,7 +87,7 @@ define void @test_non_adjacent() #0 {
   %15 = load i32, ptr %3, align 4
   %16 = add nsw i32 %15, 1
   store i32 %16, ptr %3, align 4
-  br label %5, !llvm.loop !12
+  br label %5, !llvm.loop !9
 
 17:                                               ; preds = %5
   %18 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 0
@@ -235,7 +127,7 @@ define void @test_non_adjacent() #0 {
   %36 = load i32, ptr %4, align 4
   %37 = add nsw i32 %36, 1
   store i32 %37, ptr %4, align 4
-  br label %26, !llvm.loop !13
+  br label %26, !llvm.loop !10
 
 38:                                               ; preds = %26
   ret void
@@ -268,7 +160,7 @@ define void @test_different_bounds() #0 {
   %15 = load i32, ptr %3, align 4
   %16 = add nsw i32 %15, 1
   store i32 %16, ptr %3, align 4
-  br label %5, !llvm.loop !14
+  br label %5, !llvm.loop !11
 
 17:                                               ; preds = %5
   store i32 0, ptr %4, align 4
@@ -292,7 +184,7 @@ define void @test_different_bounds() #0 {
   %28 = load i32, ptr %4, align 4
   %29 = add nsw i32 %28, 1
   store i32 %29, ptr %4, align 4
-  br label %18, !llvm.loop !15
+  br label %18, !llvm.loop !12
 
 30:                                               ; preds = %18
   ret void
@@ -325,7 +217,7 @@ define void @test_different_types() #0 {
   %15 = load i32, ptr %3, align 4
   %16 = add nsw i32 %15, 1
   store i32 %16, ptr %3, align 4
-  br label %5, !llvm.loop !16
+  br label %5, !llvm.loop !13
 
 17:                                               ; preds = %5
   store double 0.000000e+00, ptr %4, align 8
@@ -350,7 +242,7 @@ define void @test_different_types() #0 {
   %29 = load double, ptr %4, align 8
   %30 = fadd double %29, 1.000000e+00
   store double %30, ptr %4, align 8
-  br label %18, !llvm.loop !17
+  br label %18, !llvm.loop !14
 
 31:                                               ; preds = %18
   ret void
@@ -383,7 +275,7 @@ define void @test_different_step() #0 {
   %15 = load i32, ptr %3, align 4
   %16 = add nsw i32 %15, 1
   store i32 %16, ptr %3, align 4
-  br label %5, !llvm.loop !18
+  br label %5, !llvm.loop !15
 
 17:                                               ; preds = %5
   store i32 0, ptr %4, align 4
@@ -407,68 +299,9 @@ define void @test_different_step() #0 {
   %28 = load i32, ptr %4, align 4
   %29 = add nsw i32 %28, 2
   store i32 %29, ptr %4, align 4
-  br label %18, !llvm.loop !19
+  br label %18, !llvm.loop !16
 
 30:                                               ; preds = %18
-  ret void
-}
-
-; Function Attrs: noinline nounwind ssp uwtable(sync)
-define void @test_control_flow_equivalent() #0 {
-  %1 = alloca [100 x i32], align 4
-  %2 = alloca [100 x i32], align 4
-  %3 = alloca i32, align 4
-  store i32 0, ptr %3, align 4
-  br label %4
-
-4:                                                ; preds = %13, %0
-  %5 = load i32, ptr %3, align 4
-  %6 = icmp slt i32 %5, 100
-  br i1 %6, label %7, label %16
-
-7:                                                ; preds = %4
-  %8 = load i32, ptr %3, align 4
-  %9 = mul nsw i32 %8, 2
-  %10 = load i32, ptr %3, align 4
-  %11 = sext i32 %10 to i64
-  %12 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %11
-  store i32 %9, ptr %12, align 4
-  br label %13
-
-13:                                               ; preds = %7
-  %14 = load i32, ptr %3, align 4
-  %15 = add nsw i32 %14, 1
-  store i32 %15, ptr %3, align 4
-  br label %4, !llvm.loop !20
-
-16:                                               ; preds = %4
-  store i32 0, ptr %3, align 4
-  br label %17
-
-17:                                               ; preds = %29, %16
-  %18 = load i32, ptr %3, align 4
-  %19 = icmp slt i32 %18, 100
-  br i1 %19, label %20, label %32
-
-20:                                               ; preds = %17
-  %21 = load i32, ptr %3, align 4
-  %22 = sext i32 %21 to i64
-  %23 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %22
-  %24 = load i32, ptr %23, align 4
-  %25 = add nsw i32 %24, 5
-  %26 = load i32, ptr %3, align 4
-  %27 = sext i32 %26 to i64
-  %28 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %27
-  store i32 %25, ptr %28, align 4
-  br label %29
-
-29:                                               ; preds = %20
-  %30 = load i32, ptr %3, align 4
-  %31 = add nsw i32 %30, 1
-  store i32 %31, ptr %3, align 4
-  br label %17, !llvm.loop !21
-
-32:                                               ; preds = %17
   ret void
 }
 
@@ -500,7 +333,7 @@ define void @test_not_control_flow_equivalent() #0 {
   %15 = load i32, ptr %3, align 4
   %16 = add nsw i32 %15, 1
   store i32 %16, ptr %3, align 4
-  br label %5, !llvm.loop !22
+  br label %5, !llvm.loop !17
 
 17:                                               ; preds = %5
   %18 = load volatile i32, ptr %4, align 4
@@ -532,7 +365,7 @@ define void @test_not_control_flow_equivalent() #0 {
   %34 = load i32, ptr %3, align 4
   %35 = add nsw i32 %34, 1
   store i32 %35, ptr %3, align 4
-  br label %21, !llvm.loop !23
+  br label %21, !llvm.loop !18
 
 36:                                               ; preds = %21
   br label %37
@@ -568,7 +401,7 @@ define void @test_negative_distance() #0 {
   %15 = load i32, ptr %3, align 4
   %16 = add nsw i32 %15, 1
   store i32 %16, ptr %3, align 4
-  br label %5, !llvm.loop !24
+  br label %5, !llvm.loop !19
 
 17:                                               ; preds = %5
   store i32 0, ptr %4, align 4
@@ -596,9 +429,69 @@ define void @test_negative_distance() #0 {
   %32 = load i32, ptr %4, align 4
   %33 = add nsw i32 %32, 1
   store i32 %33, ptr %4, align 4
-  br label %18, !llvm.loop !25
+  br label %18, !llvm.loop !20
 
 34:                                               ; preds = %18
+  ret void
+}
+
+; Function Attrs: noinline nounwind ssp uwtable(sync)
+define void @test_good_distance() #0 {
+  %1 = alloca [100 x i32], align 4
+  %2 = alloca [100 x i32], align 4
+  %3 = alloca i32, align 4
+  %4 = alloca i32, align 4
+  store i32 0, ptr %3, align 4
+  br label %5
+
+5:                                                ; preds = %14, %0
+  %6 = load i32, ptr %3, align 4
+  %7 = icmp slt i32 %6, 98
+  br i1 %7, label %8, label %17
+
+8:                                                ; preds = %5
+  %9 = load i32, ptr %3, align 4
+  %10 = mul nsw i32 %9, 2
+  %11 = load i32, ptr %3, align 4
+  %12 = sext i32 %11 to i64
+  %13 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %12
+  store i32 %10, ptr %13, align 4
+  br label %14
+
+14:                                               ; preds = %8
+  %15 = load i32, ptr %3, align 4
+  %16 = add nsw i32 %15, 1
+  store i32 %16, ptr %3, align 4
+  br label %5, !llvm.loop !21
+
+17:                                               ; preds = %5
+  store i32 0, ptr %4, align 4
+  br label %18
+
+18:                                               ; preds = %30, %17
+  %19 = load i32, ptr %4, align 4
+  %20 = icmp slt i32 %19, 98
+  br i1 %20, label %21, label %33
+
+21:                                               ; preds = %18
+  %22 = load i32, ptr %4, align 4
+  %23 = sext i32 %22 to i64
+  %24 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %23
+  %25 = load i32, ptr %24, align 4
+  %26 = add nsw i32 %25, 1
+  %27 = load i32, ptr %4, align 4
+  %28 = sext i32 %27 to i64
+  %29 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %28
+  store i32 %26, ptr %29, align 4
+  br label %30
+
+30:                                               ; preds = %21
+  %31 = load i32, ptr %4, align 4
+  %32 = add nsw i32 %31, 1
+  store i32 %32, ptr %4, align 4
+  br label %18, !llvm.loop !22
+
+33:                                               ; preds = %18
   ret void
 }
 
@@ -607,7 +500,7 @@ attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf"
 !llvm.module.flags = !{!0, !1, !2, !3, !4}
 !llvm.ident = !{!5}
 
-!0 = !{i32 2, !"SDK Version", [2 x i32] [i32 15, i32 4]}
+!0 = !{i32 2, !"SDK Version", [2 x i32] [i32 15, i32 5]}
 !1 = !{i32 1, !"wchar_size", i32 4}
 !2 = !{i32 8, !"PIC Level", i32 2}
 !3 = !{i32 7, !"uwtable", i32 1}
@@ -630,6 +523,3 @@ attributes #0 = { noinline nounwind ssp uwtable(sync) "frame-pointer"="non-leaf"
 !20 = distinct !{!20, !7}
 !21 = distinct !{!21, !7}
 !22 = distinct !{!22, !7}
-!23 = distinct !{!23, !7}
-!24 = distinct !{!24, !7}
-!25 = distinct !{!25, !7}

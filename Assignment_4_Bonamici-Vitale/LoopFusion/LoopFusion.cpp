@@ -1,413 +1,369 @@
-#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Analysis/LoopInfo.h"
+#include <llvm/ADT/SetVector.h>
+#include <llvm/Analysis/LoopInfo.h>
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/Analysis/PostDominators.h"
-#include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Analysis/DependenceAnalysis.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/Transforms/Utils/ValueMapper.h"
-#include "llvm/Analysis/CFGPrinter.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
 
 namespace {
 
-struct LoopFusionPass : PassInfoMixin<LoopFusionPass> {
-    bool canFuse(Loop *L1, Loop *L2) {
-        // verifica che tutti i blocchi richiesti esistano
-        BasicBlock *latch1 = L1->getLoopLatch();
-        BasicBlock *latch2 = L2->getLoopLatch();
-        BasicBlock *exit1 = L1->getUniqueExitBlock();
-        BasicBlock *exit2 = L2->getUniqueExitBlock();
-        BasicBlock *header1 = L1->getHeader();
-        BasicBlock *header2 = L2->getHeader();
-        BasicBlock *pre1 = L1->getLoopPreheader();
-        BasicBlock *pre2 = L2->getLoopPreheader();
+static bool areAdjacent(Loop &L1, Loop &L2);
+static bool haveSameIteration(Loop &L1, Loop &L2, ScalarEvolution &SE);
+static bool isControlFlowEquivalent(Loop &L1, Loop &L2, 
+                                  DominatorTree &DT, PostDominatorTree &PDT);
+static bool haveNotNegativeMemoryDependencies(Loop &L1, Loop &L2, ScalarEvolution &SE, DependenceInfo &DI);
+static bool haveNotNegativeScalarDependencies(Loop &L1, Loop &L2);
+static bool haveNotNegativeDependencies(Loop &L1, Loop &L2, 
+                                      ScalarEvolution &SE, DependenceInfo &DI);
+static bool isLoopFusionValid(Loop *L1, Loop *L2, DominatorTree &DT, 
+                            PostDominatorTree &PDT, ScalarEvolution &SE, 
+                            DependenceInfo &DI);
+static void printBlock(StringRef s, BasicBlock *BB);
+static void mergeLoops(Loop *L1, Loop *L2, DominatorTree &DT, 
+                     PostDominatorTree &PDT, ScalarEvolution &SE, 
+                     DependenceInfo &DI, Function &F);
 
-        return latch1 && latch2 && exit1 && exit2 && 
-               header1 && header2 && pre1 && pre2;
-    }
+static int loop_counter;
 
-    bool haveSameIterations(Loop *L1, Loop *L2, ScalarEvolution &SE) {
-        const SCEV *tripCount1 = SE.getBackedgeTakenCount(L1);
-        const SCEV *tripCount2 = SE.getBackedgeTakenCount(L2);
+// Controlla se i loop sono adiacenti (non ci sono statement in mezzo)
+bool areAdjacent(Loop &L1, Loop &L2) {
+  bool blocksAdjacent = L1.getExitBlock() == L2.getLoopPreheader();
+
+  printBlock("L1 exit block", L1.getExitBlock());
+  printBlock("L2 preheader block", L2.getLoopPreheader());
+
+  return blocksAdjacent;                     
+}
+
+// Controlla se i loop hanno lo stesso numero di iterazioni
+bool haveSameIteration(Loop &L1, Loop &L2, ScalarEvolution &SE) {
+  const SCEV *S1 = SE.getBackedgeTakenCount(&L1);
+  const SCEV *S2 = SE.getBackedgeTakenCount(&L2);
+  
+  if (isa<SCEVCouldNotCompute>(S1) || isa<SCEVCouldNotCompute>(S2)) {
+    outs() << "-> Non posso calcolare il trip count per uno o entrambi i loop\n";
+    return false;
+  }
+  
+  outs() << "-> numero iter -> " << loop_counter << ": " 
+         << *S1 << "\n";
+  outs() << "-> numero iter ->  " << loop_counter+1 << ": " 
+         << *S2 << "\n";
+  
+  return (S1 == S2);
+}
+
+// Controlla l'equivalenza del control flow verificando che il primo loop
+// domini il secondo e che il secondo post-domini il primo
+bool isControlFlowEquivalent(Loop &L1, Loop &L2, 
+                           DominatorTree &DT, PostDominatorTree &PDT) {
+  BasicBlock *L1_block = L1.getHeader();
+  BasicBlock *L2_block = L2.getHeader();
+
+  return (DT.dominates(L1_block, L2_block) && 
+         PDT.dominates(L2_block, L1_block));
+}
+
+// Controlla le dipendenze di memoria negative
+bool haveNotNegativeMemoryDependencies(Loop &L1, Loop &L2, 
+                                     ScalarEvolution &SE, DependenceInfo &DI) {
+  for(BasicBlock* BB: L1.blocks()) {
+    for(Instruction &I : *BB) {
+      auto *storeGEP = dyn_cast<GetElementPtrInst>(&I);
+      if (!storeGEP) continue;
+      
+      auto *storeInst = dyn_cast<StoreInst>(storeGEP->getNextNode()); 
+      if (!storeInst) continue;
+
+      for (auto &U : storeGEP->getPointerOperand()->uses()) {
+        Instruction* user = dyn_cast<Instruction>(U.getUser());
+        if (!user || !L2.contains(user)) continue; 
+
+        auto *storeOrLoadGEP = dyn_cast<GetElementPtrInst>(user);
+        if (!storeOrLoadGEP) continue;
+
+        outs() << "   Store instruction dopo GEP -> " << *storeGEP << "\n";
+        outs() << "   Load instruction dopo GEP2 -> " << *storeOrLoadGEP << "\n";
+
+        const SCEV *storeSCEV = SE.getSCEVAtScope(storeGEP, &L1);
+        const SCEV *storeOrLoadSCEV = SE.getSCEVAtScope(storeOrLoadGEP, &L2);
+        const SCEV *Diff = SE.getMinusSCEV(storeOrLoadSCEV, storeSCEV);
+        const SCEV *temp = Diff; 
+        const SCEVConstant *ConstDiff = dyn_cast<SCEVConstant>(temp);
         
-        if (!tripCount1 || !tripCount2) {
-            errs() << "impossibile calcolare il numero di iterazioni\n";
+        while(!ConstDiff && !temp->operands().empty()){
+          temp = temp->operands()[0]; 
+          ConstDiff = dyn_cast<SCEVConstant>(temp);
+        }
+        
+        if (!ConstDiff) return false;
+        
+        int offset = ConstDiff->getValue()->getSExtValue();
+        outs() << "   Offset: " << offset << "\n";
+
+        const SCEVAddRecExpr *DiffRec = dyn_cast<SCEVAddRecExpr>(Diff);
+        if (!DiffRec) return false;
+
+        const SCEV *Step = DiffRec->getStepRecurrence(SE);
+        const SCEVConstant *ConstStep = dyn_cast<SCEVConstant>(Step);
+        if(!ConstStep) return false;
+
+        int step = ConstStep->getValue()->getSExtValue();
+        outs() << "   Step value: " << step << "\n";
+      
+        if ((step > 0 && offset > 0) || (step < 0 && offset < 0)) {
+          outs() << "-> Dipendenza negativa trovata: offset " 
+                << offset << " con step " << step << "\n";
+          return false;
+        }
+      }  
+    } 
+  }
+  return true;
+}
+
+// Controlla le dipendenze scalari negative
+bool haveNotNegativeScalarDependencies(Loop &L1, Loop &L2) {
+  for (BasicBlock *BB2 : L2.blocks()) {
+    for (Instruction &I2 : *BB2) {
+      for (Value *Op : I2.operands()) {
+        if (Instruction *Def = dyn_cast<Instruction>(Op)) {
+          if (L1.contains(Def) && !L1.isLoopInvariant(Def)) {
+            outs() << "-> Dipendenza negativa: " << I2 
+                  << " dipende da non-invariante: " << *Def << "\n";
             return false;
+          }
         }
-        
-        errs() << "numero di iterazioni:\n";
-        errs() << "  L1: " << *tripCount1 << "\n";
-        errs() << "  L2: " << *tripCount2 << "\n";
-        
-        bool equal = tripCount1 == tripCount2;
-        errs() << "  Uguali: " << (equal ? "si" : "no") << "\n";
-        return equal;
+      }
     }
+  }
+  return true;
+}
 
-    bool areConnected(Loop *L1, Loop *L2) {
-        return DirectlyConnected(L1, L2) || DirectlyConnected(L2, L1);
+// Controllo combinato delle dipendenze
+bool haveNotNegativeDependencies(Loop &L1, Loop &L2, 
+                               ScalarEvolution &SE, DependenceInfo &DI) {
+  return haveNotNegativeMemoryDependencies(L1, L2, SE, DI) && 
+         haveNotNegativeScalarDependencies(L1, L2);
+}
+
+// Funzione per fondere due loop validi
+void mergeLoops(Loop *L1, Loop *L2, DominatorTree &DT, 
+               PostDominatorTree &PDT, ScalarEvolution &SE, 
+               DependenceInfo &DI, Function &F) {
+  BasicBlock *preHeaderL1 = L1->getLoopPreheader();
+  BasicBlock *headerL1 = L1->getHeader();
+  BasicBlock *latchL1 = L1->getLoopLatch();
+  BasicBlock *firstBlockBodyL1 = headerL1->getTerminator()->getSuccessor(0);
+  BasicBlock *lastBlockBodyL1 = latchL1->getSinglePredecessor();
+  BasicBlock *exitingL1 = L1->getExitingBlock();
+  BasicBlock *exitL1 = L1->getExitBlock();
+
+  outs() << "*** L1 BLOCKS ***\n";
+  printBlock("L1 PreHeader", preHeaderL1);
+  printBlock("L1 Header", headerL1);
+  printBlock("L1 First Block Body", firstBlockBodyL1);
+  printBlock("L1 Last Block Body", lastBlockBodyL1);
+  printBlock("L1 Latch", latchL1);
+  printBlock("L1 Exiting Block", exitingL1);
+  printBlock("L1 Exit Block", exitL1);
+
+  BasicBlock *preHeaderL2 = L2->getLoopPreheader();
+  BasicBlock *headerL2 = L2->getHeader();
+  BasicBlock *latchL2 = L2->getLoopLatch();
+  BasicBlock *firstBlockBodyL2 = headerL2->getTerminator()->getSuccessor(0);
+  BasicBlock *lastBlockBodyL2 = latchL2->getSinglePredecessor();
+  BasicBlock *exitingL2 = L2->getExitingBlock();
+  BasicBlock *exitL2 = L2->getExitBlock();
+
+  outs() << "*** L2 BLOCKS ***\n";
+  printBlock("L2 PreHeader", preHeaderL2);
+  printBlock("L2 Header", headerL2);
+  printBlock("L2 First Block Body", firstBlockBodyL2);
+  printBlock("L2 Last Block Body", lastBlockBodyL2);
+  printBlock("L2 Latch", latchL2);
+  printBlock("L2 Exiting Block", exitingL2);
+  printBlock("L2 Exit Block", exitL2);
+
+  // Sostituisce la variabile di induzione di L2 con quella di L1
+  PHINode *inductionVariableL1 = L1->getCanonicalInductionVariable();
+  PHINode *inductionVariableL2 = L2->getCanonicalInductionVariable();
+
+  outs() << "IV L1: " << *inductionVariableL1 << "\n";
+  outs() << "IV L2: " << *inductionVariableL2 << "\n";
+  
+  inductionVariableL2->replaceAllUsesWith(inductionVariableL1);
+  inductionVariableL2->eraseFromParent();
+
+  // Sposta le istruzioni dal preheader di L2 a L1
+  std::vector<Instruction*> instPreHeaderL2toMove;
+  for (Instruction &inst : *preHeaderL2) {
+    if (&inst != preHeaderL2->getTerminator()) {
+        instPreHeaderL2toMove.push_back(&inst);
     }
+  }
+  
+  for (Instruction *inst : instPreHeaderL2toMove) {
+    outs() << "Muovo inst dal preheader di L2: " << *inst << "\n";
+    inst->moveBefore(preHeaderL1->getTerminator());
+  }
 
-    bool DirectlyConnected(Loop *L1, Loop *L2) {
-        BasicBlock *Exit1 = L1->getUniqueExitBlock();
-        BasicBlock *Pre2 = L2->getLoopPreheader();
-        BasicBlock *Header1 = L1->getHeader();
-        BasicBlock *Header2 = L2->getHeader();
-        BasicBlock *Pre1 = L1->getLoopPreheader();
-        
-        if (!Exit1 || !Pre2) {
-            errs() << "-> blocchi richiesti mancanti\n";
-            return false;
-        }
+  // Aggiorna i phi node
+  preHeaderL2->replaceSuccessorsPhiUsesWith(preHeaderL1);
+  latchL2->replaceSuccessorsPhiUsesWith(latchL1);
 
-        // caso 1: connessione diretta
-        if (Exit1 == Pre2) {
-            errs() << "-> CASO 1: connessione diretta (exit = preheader)\n";
-            return true;
-        }
-        for (BasicBlock *Succ : successors(Exit1))
-            if (Succ == Pre2) {
-                errs() << "-> CASO 1: connessione diretta (exit -> preheader)\n";
-                return true;
-            }
+  // Sposta le istruzioni dall'header di L2 a L1
+  std::vector<Instruction*> instHeaderL2ToMove;
+  for (Instruction &inst : *headerL2) {
+    if (&inst != headerL2->getTerminator())
+      instHeaderL2ToMove.push_back(&inst);
+  }
 
-        errs() << "\n-> cerco pattern con guardia...\n";
-        
-        // caso 2: pattern con guardia
-        BasicBlock *Guard = nullptr;
-        
-        for (BasicBlock *Pred : predecessors(Pre1)) {
-            errs() << "  controllo predecessore del preheader: " << Pred->getName() << "\n";
-            
-            if (BranchInst *Branch = dyn_cast<BranchInst>(Pred->getTerminator())) {
-                errs() << "    trovato branch: " << *Branch << "\n";
-                
-                if (!Branch->isConditional()) {
-                    errs() << "    non è condizionale\n";
-                    continue;
-                }
-                
-                BasicBlock *Succ0 = Branch->getSuccessor(0);
-                BasicBlock *Succ1 = Branch->getSuccessor(1);
-                
-                errs() << "    successore 0: " << Succ0->getName() << "\n";
-                errs() << "    successore 1: " << Succ1->getName() << "\n";
-                
-                bool toL1_0 = (Succ0 == Pre1);
-                bool toL1_1 = (Succ1 == Pre1);
-                bool toL2_0 = (Succ0 == Pre2);
-                bool toL2_1 = (Succ1 == Pre2);
-                
-                if ((toL1_0 && toL2_1) || (toL1_1 && toL2_0)) {
-                    Guard = Pred;
-                    errs() << "  trovata guardia!\n";
-                    break;
-                }
-                
-                errs() << "non porta ai loop corretti\n";
-            } else {
-                errs() << "non è un branch\n";
-            }
-        }
+  for (Instruction *inst : instHeaderL2ToMove) {
+    outs() << "Muovo inst da header di L2: " << *inst << "\n";
+    if (isa<PHINode>(inst))
+      inst->moveBefore(headerL1->getFirstNonPHI());
+    else
+      inst->moveBefore(headerL1->getTerminator());
+  }
 
-        if (Guard) {
-            errs() << "-> CASO 2: pattern con guardia trovato\n";
-            return true;
-        }
+  // Aggiorna il control flow
+  exitingL1->getTerminator()->setSuccessor(1, exitL2);
+  lastBlockBodyL1->getTerminator()->setSuccessor(0, firstBlockBodyL2);
+  lastBlockBodyL2->getTerminator()->setSuccessor(0, latchL1);
 
-        errs() << "-> nessuna connessione trovata\n";
-        return false;
+  // Pulisci i blocchi non raggiungibili
+  EliminateUnreachableBlocks(F);  
+  F.print(outs());
+}
+
+// Funzione di utilità per stampare i blocchi
+void printBlock(StringRef s, BasicBlock *BB) {
+  outs() << s << ": ";
+  BB->printAsOperand(outs(), false);
+  outs() << "\n";
+}
+
+// Verifica se la fusione dei loop è possibile
+bool isLoopFusionValid(Loop *L1, Loop *L2, DominatorTree &DT, 
+                      PostDominatorTree &PDT, ScalarEvolution &SE, 
+                      DependenceInfo &DI) {
+
+  if (!areAdjacent(*L1, *L2)) {
+    outs() << "=> Loops non adiacenti\n";
+    return false;
+  }
+  outs() << "=> Loop " << loop_counter << " e' adiacente con loop " 
+         << loop_counter+1 << "\n";
+
+  if(!haveSameIteration(*L1, *L2, SE)) {
+    outs() << "=> Loops hanno iterazioni diverse\n";
+    return false;
+  }
+  outs() << "=> Loop " << loop_counter << " e Loop " << loop_counter+1 
+         << " hanno lo stesso numero di iterazioni\n";
+
+  if(!isControlFlowEquivalent(*L1, *L2, DT, PDT)) {
+    outs() << "=> Loops non control flow equivalenti\n";
+    return false;
+  }
+  outs() << "=> Loop " << loop_counter << " e " << loop_counter+1 
+         << " sono control flow equivalenti\n";
+
+  if(!haveNotNegativeDependencies(*L1, *L2, SE, DI)) {
+    outs() << "=> Loops hanno dipendenze negative\n";
+    return false;
+  }
+  outs() << "=> Loop " << loop_counter << " e " << loop_counter+1 
+         << " non hanno dipendenze negative \n";
+
+  return true;
+}
+
+struct LoopFusionPass : public PassInfoMixin<LoopFusionPass> {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
+    LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
+    DominatorTree &DT = AM.getResult<DominatorTreeAnalysis>(F);
+    PostDominatorTree &PDT = AM.getResult<PostDominatorTreeAnalysis>(F);
+    ScalarEvolution &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
+    DependenceInfo &DI = AM.getResult<DependenceAnalysis>(F);
+    
+    if (LI.empty()) {
+      outs() << "Function " << F.getName() << ": nessun loop trovato.\n";
+      return PreservedAnalyses::all();
     }
+    
+    outs() << "\n*** LoopFusionPass ***\n";
+    outs() << "=== Function: " << F.getName() << " ===\n\n";
 
-    bool areCFEquiv(Loop *L0, Loop *L1, DominatorTree &DT, PostDominatorTree &PDT) {
-        BasicBlock *Pre0 = L0->getLoopPreheader();
-        BasicBlock *Pre1 = L1->getLoopPreheader();
-        BasicBlock *Exit0 = L0->getUniqueExitBlock();
-        BasicBlock *Exit1 = L1->getUniqueExitBlock();
+    loop_counter = 1;  
+    auto L1 = LI.rbegin();
+    auto L2 = std::next(L1);
+    
+    while (L2 != LI.rend()){
+      outs() << "* Controllo Loop " << loop_counter << " e Loop " 
+             << loop_counter+1 << " *\n";
+      
+      if(isLoopFusionValid(*L1, *L2, DT, PDT, SE, DI)){
+        outs() << "\nLoop " << loop_counter << " e Loop " 
+               << loop_counter+1 << " possono essere fusi\n\n";
+
+        mergeLoops(*L1, *L2, DT, PDT, SE, DI, F);
         
-        if (!Pre0 || !Pre1 || !Exit0 || !Exit1) {
-            errs() << "Control Flow Equivalence Check: blocchi mancanti\n";
-            return false;
+        DT.recalculate(F);  
+        PDT.recalculate(F);
+        SE.forgetLoop(*L1);
+        
+        LI.releaseMemory(); 
+        LI.analyze(DT);
+
+        L1 = LI.rbegin();  
+        for(int i = 1; i < loop_counter; i++) {
+          L1++;
         }
-        
-        bool L0DominatesL1 = DT.dominates(Pre0, Pre1);
-        bool L1PostDominatesL0 = PDT.dominates(Exit1, Exit0);
-        
-        errs() << "Flow Equivalence check:\n";
-        errs() << "  L0 domina L1: " << (L0DominatesL1 ? "si" : "no") << "\n";
-        errs() << "  L1 post-domina L0: " << (L1PostDominatesL0 ? "si" : "no") << "\n";
-        
-        if (L0DominatesL1 && L1PostDominatesL0) {
-            errs() << "  -> Loop sono control flow equivalent!\n";
-            return true;
-        }
-        return false;
+        L2 = std::next(L1);
+
+        outs() << "\nLoop fusi - L2 rimosso e L1 aggiornato\n";
+      } else {
+        loop_counter++;
+        L1++;
+        L2 = std::next(L1);
+      }
+      
+      outs() << "\n";
     }
-
-    Value* findBaseIndexExpression(Value *V) {
-        if (Instruction *I = dyn_cast<Instruction>(V)) {
-            // Se è un'istruzione di cast guarda l'operando
-            if (CastInst *Cast = dyn_cast<CastInst>(I)) {
-                return findBaseIndexExpression(Cast->getOperand(0));
-            }
-            // Se è un'operazione binaria, ritornala
-            if (BinaryOperator *BinOp = dyn_cast<BinaryOperator>(I)) {
-                return BinOp;
-            }
-        }
-        return V;
-    }
-
-    bool areNegDistance(Loop *L1, Loop *L2) {
-        errs() << "\n=== Analisi dipendenze negative ===\n";
-        
-        for (BasicBlock *BB : L2->getBlocks()) {
-            for (Instruction &I : *BB) {
-                if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(&I)) {
-                    // prendo l'indice (ultimo operando del GEP)
-                    Value *Index = GEP->getOperand(GEP->getNumOperands()-1);
-                    
-                    // se l'indice viene da un cast guardo l'operando 
-                    if (CastInst *Cast = dyn_cast<CastInst>(Index)) {
-                        Index = Cast->getOperand(0);
-                    }
-                    
-                    // controllo se è una add con costante positiva
-                    if (BinaryOperator *Add = dyn_cast<BinaryOperator>(Index)) {
-                        if (Add->getOpcode() == Instruction::Add) {
-                            if (ConstantInt *Const = dyn_cast<ConstantInt>(Add->getOperand(1))) {
-                                if (Const->getSExtValue() > 0) {
-                                    errs() << "Trovata dipendenza negativa: accesso a[i+" 
-                                           << Const->getSExtValue() << "]\n";
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    bool fuse(Loop *firstLoop, Loop *secondLoop, DominatorTree &DT, LoopInfo &LI) {
-        // recupero tutti i blocchi necessari
-        BasicBlock *Header1 = firstLoop->getHeader();
-        BasicBlock *Header2 = secondLoop->getHeader();
-        BasicBlock *Latch1 = firstLoop->getLoopLatch();
-        BasicBlock *Latch2 = secondLoop->getLoopLatch();
-        BasicBlock *Exit2 = secondLoop->getUniqueExitBlock();
-        BasicBlock *Body1 = nullptr;
-        BasicBlock *Body2 = nullptr;
-        
-        // cerco i blocchi body (primo blocco non-header e non-latch)
-        for (BasicBlock *BB : firstLoop->getBlocks()) {
-            if (BB != Header1 && BB != Latch1) {
-                Body1 = BB;
-                break;
-            }
-        }
-        
-        for (BasicBlock *BB : secondLoop->getBlocks()) {
-            if (BB != Header2 && BB != Latch2) {
-                Body2 = BB;
-                break;
-            }
-        }
-        
-        if (!Header1 || !Header2 || !Body1 || !Body2 || !Latch1 || !Latch2 || !Exit2) {
-            errs() << "Blocchi richiesti mancanti\n";
-            return false;
-        }
-
-        errs() << "\n=== Inizio Fusione Loop ===\n";
-        
-        // Passo 1: sostituzione variabile induzione
-        PHINode *IndVar1;
-        PHINode *IndVar2;
-
-        // recupero IndVar1 nel primo header
-        for (BasicBlock::iterator I = Header1->begin(); isa<PHINode>(I); ++I) {
-            PHINode *Phi = cast<PHINode>(I);
-            IndVar1 = Phi;
-            break;
-        }
-
-        // recupero IndVar2 nel secondo header
-        for (BasicBlock::iterator I = Header2->begin(); isa<PHINode>(I); ++I) {
-            PHINode *Phi = cast<PHINode>(I);
-            IndVar2 = Phi;
-            break;
-        }
-
-        if (!IndVar1 || !IndVar2) {
-            errs() << "Variabili di induzione non trovate\n";
-            return false;
-        }
-
-        errs() << "\n=== debug sostituzione variabile induzione ===\n";
-        errs() << "indVar1: " << *IndVar1 << "\n";
-        errs() << "indVar2: " << *IndVar2 << "\n";
-
-        // sostituisco tutti gli usi di IndVar2 con IndVar1 nei blocchi del secondo loop
-        for (BasicBlock *BB : secondLoop->getBlocks()) {
-            if (BB == Header2) continue;
-            
-            errs() << "\nprocesso blocco: " << BB->getName() << "\n";
-            
-            for (Instruction &I : *BB) {
-                bool modified = false;
-                for (unsigned i = 0; i < I.getNumOperands(); ++i) {
-                    if (I.getOperand(i) == IndVar2) {
-                        errs() << "  sostituisco in: " << I << "\n";
-                        errs() << "    operando " << i << ": " << *IndVar2 << " -> " << *IndVar1 << "\n";
-                        I.setOperand(i, IndVar1);
-                        modified = true;
-                    }
-                }
-                if (modified) {
-                    errs() << "  risultato: " << I << "\n";
-                }
-            }
-        }
-
-        // trasformazione CFG
-        errs() << "\ntrasformazione CFG:\n";
-
-        // HeaderLoop1 -> L2Exit
-        Instruction *Header1Term = Header1->getTerminator();
-        for (unsigned i = 0; i < Header1Term->getNumSuccessors(); ++i) {
-            if (Header1Term->getSuccessor(i) == Body1) {
-                errs() << "  redirigo Header1 -> Exit2\n";
-                Header1Term->setSuccessor(i, Exit2);
-            }
-        }
-
-        // Body1 -> Body2
-        Instruction *Body1Term = Body1->getTerminator();
-        for (unsigned i = 0; i < Body1Term->getNumSuccessors(); ++i) {
-            errs() << "  redirigo Body1 -> Body2\n";
-            Body1Term->setSuccessor(i, Body2);
-        }
-
-        // Header2 -> Latch2
-        Instruction *Header2Term = Header2->getTerminator();
-        for (unsigned i = 0; i < Header2Term->getNumSuccessors(); ++i) {
-            errs() << "  redirigo Header2 -> Latch2\n";
-            Header2Term->setSuccessor(i, Latch2);
-        }
-
-        // Body2 -> Latch1
-        Instruction *Body2Term = Body2->getTerminator();
-        for (unsigned i = 0; i < Body2Term->getNumSuccessors(); ++i) {
-            errs() << "  redirigo Body2 -> Latch1\n";
-            Body2Term->setSuccessor(i, Latch1);
-        }
-
-        // rimuovo il secondo loop dalla LoopInfo
-        LI.erase(secondLoop);
-
-        // ricalcolo l'albero dei dominatori
-        DT.recalculate(*Header1->getParent(), ArrayRef<DominatorTree::UpdateType>());
-
-        errs() << "=== fusione loop completata ===\n";
-        return true;
-    }
-
-    PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
-        errs() << "\n=== inizio analisi funzione: " << F.getName() << " ===\n";
-        
-        auto &LI = FAM.getResult<LoopAnalysis>(F);
-        auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
-        auto &PDT = FAM.getResult<PostDominatorTreeAnalysis>(F);
-        auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
-
-        SmallVector<Loop*, 8> Loops(LI.begin(), LI.end());
-        bool modified = false;
-
-        errs() << "trovati " << Loops.size() << " loops\n";
-
-        for (size_t i = 0; i + 1 < Loops.size(); ++i) {
-            Loop *L1 = Loops[i];
-            Loop *L2 = Loops[i + 1];
-
-            errs() << "\ncoppia loops -> " << i << " & " << (i+1) << ":\n";
-
-            if (!canFuse(L1, L2)) {
-                errs() << "impossibile fondere i loop: mancano blocchi latch o exit\n";
-                continue;
-            }
-
-            if (!areConnected(L1, L2)) {
-                errs() << "i loop non sono connessi nel CFG\n";
-                continue;
-            }
-
-            errs() << "trovati loop adiacenti!\n";
-            
-            Loop *first = L1;
-            Loop *second = L2;
-            if (DirectlyConnected(L2, L1)) {
-                errs() << "scambio ordine dei loop!\n";
-                std::swap(first, second);
-            }
-
-            if (!areCFEquiv(first, second, DT, PDT)) {
-                errs() << "i loop non sono control flow equivalent\n";
-                continue;
-            }
-
-            if (!haveSameIterations(first, second, SE)) {
-                errs() << "i loop hanno un numero diverso di iterazioni\n";
-                continue;
-            }
-
-            if (areNegDistance(first, second)) {
-                errs() << "trovata dipendenza negativa tra i loop\n";
-                continue;
-            }
-
-            if (fuse(first, second, DT, LI)) {
-                errs() << "fusione riuscita!\n";
-                modified = true;
-                Loops.erase(Loops.begin() + i + 1);
-                --i;
-            } else {
-                errs() << "fusione fallita\n";
-            }
-        }
-
-        errs() << "=== analisi funzione completata ===\n\n";
-        return modified ? PreservedAnalyses::none() : PreservedAnalyses::all();
-    }
-
-    static bool isRequired() { return true; }
+    
+    return PreservedAnalyses::all();
+  }
 };
 
-}
+} // namespace
 
-llvm::PassPluginLibraryInfo getLoopFusionPassPluginInfo() {
-    return {
-        LLVM_PLUGIN_API_VERSION, "LoopFusionPass", LLVM_VERSION_STRING,
-        [](PassBuilder &passBuilder) {
-            passBuilder.registerPipelineParsingCallback(
-                [](StringRef name, FunctionPassManager &functionPassManager,
-                   ArrayRef<PassBuilder::PipelineElement>) {
-                    if (name == "lf") {
-                        functionPassManager.addPass(LoopFusionPass());
-                        return true;
-                    }
-                    return false;
-                });
-        }};
-}
-
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
-    return getLoopFusionPassPluginInfo();
+extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
+llvmGetPassPluginInfo() {
+  return {
+    LLVM_PLUGIN_API_VERSION,
+    "LoopFusion",
+    LLVM_VERSION_STRING,
+    [](PassBuilder &PB) {
+      PB.registerPipelineParsingCallback(
+          [](StringRef Name, FunctionPassManager &FPM,
+             ArrayRef<PassBuilder::PipelineElement>) {
+            if (Name == "lf") {
+              FPM.addPass(LoopFusionPass());
+              return true;
+            }
+            return false;
+          });
+    }
+  };
 }
