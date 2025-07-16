@@ -14,7 +14,7 @@ int test(int c, int f) {
         }
 
         d = a + 1;     // LI
-        f = e + 2;     // no loop inv per e
+        f = e + 2;     // no loop inv
         i++;           // PHInode non spostabile
     }
 
