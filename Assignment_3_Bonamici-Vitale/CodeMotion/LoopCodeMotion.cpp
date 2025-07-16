@@ -1,105 +1,178 @@
-#include "llvm/IR/LegacyPassManager.h"
+#include <llvm/ADT/SetVector.h>
+#include <llvm/Analysis/LoopInfo.h>
+#include "llvm/IR/Dominators.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/IR/Dominators.h"
-#include "llvm/Analysis/LoopPass.h"
-#include "llvm/Transforms/Utils/LoopUtils.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/Support/Debug.h"
 
 using namespace llvm;
 
-#define DEBUG_TYPE "loop-invariant-code-motion"
-
-namespace {
-  
-bool loopInvariant(const Instruction &I, const Loop *L) {
-  if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
-    if (CI->mayHaveSideEffects()) return false;
+// Funzione per controllare se un'istruzione è loop invariant 
+bool loopInvariant(SetVector<Instruction*> instInvarianti, Loop &L, Instruction &Inst) {
+  bool ridefinitoDentroLoop;
+  for (Value* op : Inst.operands()) { 
+    if (isa<Constant>(op) || isa<Argument>(op)) continue;
+    
+    // L'operando è loop invariant se la sua definizione è esterna la loop,
+    // oppure se dentro al loop, non è un PHINode ed è loop invariant 
+    if (Instruction* I = dyn_cast<Instruction>(op)) { 
+      ridefinitoDentroLoop = L.contains(I); 
+      if (!ridefinitoDentroLoop || (!isa<PHINode>(I) && instInvarianti.contains(I))) 
+        continue;  
+    }
+    return false;
   }
+  return true;
+}
 
-  for (const Use &U : I.operands()) {
-    const Value *V = U.get();
-    if (isa<Constant>(V) || isa<Argument>(V)) continue;
-    if (const Instruction *OpInst = dyn_cast<Instruction>(V)) {
-      if (L->contains(OpInst->getParent())) return false;
+// Funzione per controllare se l'istruzione ha dipendenze non instSpostate
+bool haDipendenze(SetVector<Instruction*> &instSpostate, Loop &L, Instruction &I) {
+  for (Value* op : I.operands()) {
+    if (isa<Constant>(op) || isa<Argument>(op))
+      continue;
+
+    if (Instruction* opInst = dyn_cast<Instruction>(op)) {
+      if (L.contains(opInst) && !instSpostate.contains(opInst))
+        return true; 
     }
   }
-  return true;
+  return false;
 }
 
-bool spostabile(const Instruction &I) {
-  if (I.isTerminator() || isa<PHINode>(I) || I.mayHaveSideEffects())
+// Funzione per verificare code motion
+bool spostabile(DominatorTree &DT, Loop &L, Instruction &I) {
+  bool dominaUsciteLoop, dominaTuttiUsi;
+
+  if (I.mayHaveSideEffects()) {
+    outs() << "   Istruzione: " << I << "\n";
+    errs() << "   ↳ NON movibile: istruzione ha effetti collaterali\n";
     return false;
+  }
+
+  SmallVector<BasicBlock*> loopExitBB; 
+  L.getExitBlocks(loopExitBB);
+
+  outs() << " - Istruzione: " << I;
+
+  for (BasicBlock* block : loopExitBB) { 
+    if (!DT.dominates(I.getParent(), block)) {
+      dominaUsciteLoop = false;
+      break;
+    }
+  }
+
+
+  if (!dominaUsciteLoop) {
+    for (Use &U : I.uses()) {
+      if (Instruction* user = dyn_cast<Instruction>(U.getUser())) { 
+        if (!L.contains(user)) {
+          outs() << "\n";
+          errs() << "   ↳ NON movibile: blocco non domina tutte le uscite e l'isruzione e usata fuori dal loop\n";
+          return false;
+        }
+      }
+    }
+  }
+
+  for (Use &U : I.uses()) {  
+    if (PHINode* phi = dyn_cast<PHINode>(U.getUser())) {
+      if (L.contains(phi)) {
+        outs() << "\n";
+        errs() << "   ↳ NON movibile: uso in PHI node (more reaching definitions)\n";
+        return false;
+      }
+    }
+    dominaTuttiUsi = DT.dominates(&I, U);  
+    if (!dominaTuttiUsi) {
+      outs() << "\n";
+      errs() << "   ↳ NON movibile: istruzione non domina tutti i suoi usi\n";
+      return false;
+    }
+  }
+
+  outs() << "  ✔︎ Movibile\n";
   return true;
 }
 
-struct LoopCodeMotion : PassInfoMixin<LoopCodeMotion> {
+
+struct LoopInvariantCodeMotionPass : PassInfoMixin<LoopInvariantCodeMotionPass> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
     LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
     DominatorTree &DT = AM.getResult<DominatorTreeAnalysis>(F);
-    bool Changed = false;
 
-    for (Loop *L : LI) {
-      BasicBlock *preheader = L->getLoopPreheader();
-      if (!preheader) continue;
+    for (Loop *L : LI) {   
+      SetVector<Instruction*> instInvarianti;       
+      SetVector<Instruction*> instMovibili;          
+      SetVector<Instruction*> instSpostate;           
 
-      SmallVector<Instruction *, 16> InvariantInsts;
+      SmallVector<BasicBlock*> exitBB;          
+      L->getExitBlocks(exitBB);                 
 
-      for (BasicBlock *BB : L->blocks()) {
-        bool IsHeader = (BB == L->getHeader());
-        auto I = BB->begin();
-        if (IsHeader) {
-          while (I != BB->end() && isa<PHINode>(&*I))
-            ++I;
-        }
+      outs() << "loop: ";
+      for (BasicBlock* BB : L->blocks()) {
+        BB->printAsOperand(errs(), false); 
+        outs() << " || ";
 
-        for (; I != BB->end(); ++I) {
-          Instruction &Inst = *I;
-          if (loopInvariant(Inst, L) && spostabile(Inst)) {
-            InvariantInsts.push_back(&Inst);
-          }
+        for (Instruction &I : *BB){ 
+          if (loopInvariant(instInvarianti, *L, I))
+            instInvarianti.insert(&I); 
         }
       }
 
-      Instruction *InsertPoint = preheader->getTerminator();
-      for (Instruction *Inst : InvariantInsts) {
-        Inst->moveBefore(InsertPoint);
-        Changed = true;
+      outs() << "\n";
+      for (Instruction* I : instInvarianti) {
+        if (spostabile(DT, *L, *I)) 
+          instMovibili.insert(I); 
+      }
+
+      outs() << "\n" << "Istruzioni loop invariant: \n";
+      for (Instruction* I : instInvarianti) 
+        outs() << "  --- " << *I << "\n";
+      
+      outs() << "Istruzioni instMovibili: \n";
+      for (Instruction* I : instMovibili) 
+        outs() << "  --- " << *I << "\n";
+
+      bool changed;
+      do {
+        changed = false;
+        for (auto I = instMovibili.rbegin(); I != instMovibili.rend(); ++I) {
+          if (!instSpostate.contains(*I) && !haDipendenze(instSpostate, *L, **I)) {
+            (*I)->moveBefore(L->getLoopPreheader()->getTerminator());
+            instSpostate.insert(*I);
+            changed = true;
+          }
+        }
+      } while (changed);
+
+      outs() << "Istruzioni spostate: \n";
+      for (Instruction* I : instSpostate) {
+        outs() << "  --- " << *I << "\n";
       }
     }
 
-    return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+    return PreservedAnalyses::all();
   }
-
+  
   static bool isRequired() { return true; }
 };
 
-} 
-
-llvm::PassPluginLibraryInfo getLoopCodeMotionPluginInfo() {
+llvm::PassPluginLibraryInfo getTestPassPluginInfo() {
   return {
-    LLVM_PLUGIN_API_VERSION, 
-    "LoopCodeMotion", 
-    LLVM_VERSION_STRING,
-    [](PassBuilder &PB) {
-      PB.registerPipelineParsingCallback(
-        [](StringRef Name, FunctionPassManager &FPM, 
-           ArrayRef<PassBuilder::PipelineElement>) {
-          if (Name == "li") {
-            FPM.addPass(LoopCodeMotion());
-            return true;
-          }
-          return false;
-        });
+    LLVM_PLUGIN_API_VERSION, "LocalOpt", LLVM_VERSION_STRING, [](PassBuilder &PB) {
+      PB.registerPipelineParsingCallback([](StringRef Name, FunctionPassManager &FPM, 
+                                      ArrayRef<PassBuilder::PipelineElement>) {
+        if (Name == "li") {
+          FPM.addPass(LoopInvariantCodeMotionPass());
+          return true;
+        }
+        return false;
+      });
     }
   };
 }
 
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
-llvmGetPassPluginInfo() {
-  return getLoopCodeMotionPluginInfo();
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
+  return getTestPassPluginInfo();
 }

@@ -116,19 +116,22 @@ define void @test_different_bounds() #0 {
   br label %3, !llvm.loop !11
 
 10:                                               ; preds = %12, %.preheader
-  %.01 = phi i32 [ %16, %12 ], [ 0, %.preheader ]
+  %.01 = phi i32 [ %19, %12 ], [ 0, %.preheader ]
   %11 = icmp slt i32 %.01, 50
-  br i1 %11, label %12, label %17
+  br i1 %11, label %12, label %20
 
 12:                                               ; preds = %10
-  %13 = add nsw i32 %.01, 5
-  %14 = sext i32 %.01 to i64
-  %15 = getelementptr inbounds [50 x i32], ptr %2, i64 0, i64 %14
-  store i32 %13, ptr %15, align 4
-  %16 = add nsw i32 %.01, 1
+  %13 = sext i32 %.01 to i64
+  %14 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %13
+  %15 = load i32, ptr %14, align 4
+  %16 = add nsw i32 %15, 4
+  %17 = sext i32 %.01 to i64
+  %18 = getelementptr inbounds [50 x i32], ptr %2, i64 0, i64 %17
+  store i32 %16, ptr %18, align 4
+  %19 = add nsw i32 %.01, 1
   br label %10, !llvm.loop !12
 
-17:                                               ; preds = %10
+20:                                               ; preds = %10
   ret void
 }
 
@@ -195,19 +198,22 @@ define void @test_different_step() #0 {
   br label %3, !llvm.loop !15
 
 10:                                               ; preds = %12, %.preheader
-  %.01 = phi i32 [ %16, %12 ], [ 0, %.preheader ]
+  %.01 = phi i32 [ %19, %12 ], [ 0, %.preheader ]
   %11 = icmp slt i32 %.01, 100
-  br i1 %11, label %12, label %17
+  br i1 %11, label %12, label %20
 
 12:                                               ; preds = %10
-  %13 = add nsw i32 %.01, 5
-  %14 = sext i32 %.01 to i64
-  %15 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %14
-  store i32 %13, ptr %15, align 4
-  %16 = add nsw i32 %.01, 2
+  %13 = sext i32 %.01 to i64
+  %14 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %13
+  %15 = load i32, ptr %14, align 4
+  %16 = add nsw i32 %15, 5
+  %17 = sext i32 %.01 to i64
+  %18 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %17
+  store i32 %16, ptr %18, align 4
+  %19 = add nsw i32 %.01, 2
   br label %10, !llvm.loop !16
 
-17:                                               ; preds = %10
+20:                                               ; preds = %10
   ret void
 }
 

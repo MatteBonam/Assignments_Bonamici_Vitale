@@ -166,27 +166,30 @@ define void @test_different_bounds() #0 {
   store i32 0, ptr %4, align 4
   br label %18
 
-18:                                               ; preds = %27, %17
+18:                                               ; preds = %30, %17
   %19 = load i32, ptr %4, align 4
   %20 = icmp slt i32 %19, 50
-  br i1 %20, label %21, label %30
+  br i1 %20, label %21, label %33
 
 21:                                               ; preds = %18
   %22 = load i32, ptr %4, align 4
-  %23 = add nsw i32 %22, 5
-  %24 = load i32, ptr %4, align 4
-  %25 = sext i32 %24 to i64
-  %26 = getelementptr inbounds [50 x i32], ptr %2, i64 0, i64 %25
-  store i32 %23, ptr %26, align 4
-  br label %27
+  %23 = sext i32 %22 to i64
+  %24 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %23
+  %25 = load i32, ptr %24, align 4
+  %26 = add nsw i32 %25, 4
+  %27 = load i32, ptr %4, align 4
+  %28 = sext i32 %27 to i64
+  %29 = getelementptr inbounds [50 x i32], ptr %2, i64 0, i64 %28
+  store i32 %26, ptr %29, align 4
+  br label %30
 
-27:                                               ; preds = %21
-  %28 = load i32, ptr %4, align 4
-  %29 = add nsw i32 %28, 1
-  store i32 %29, ptr %4, align 4
+30:                                               ; preds = %21
+  %31 = load i32, ptr %4, align 4
+  %32 = add nsw i32 %31, 1
+  store i32 %32, ptr %4, align 4
   br label %18, !llvm.loop !12
 
-30:                                               ; preds = %18
+33:                                               ; preds = %18
   ret void
 }
 
@@ -281,27 +284,30 @@ define void @test_different_step() #0 {
   store i32 0, ptr %4, align 4
   br label %18
 
-18:                                               ; preds = %27, %17
+18:                                               ; preds = %30, %17
   %19 = load i32, ptr %4, align 4
   %20 = icmp slt i32 %19, 100
-  br i1 %20, label %21, label %30
+  br i1 %20, label %21, label %33
 
 21:                                               ; preds = %18
   %22 = load i32, ptr %4, align 4
-  %23 = add nsw i32 %22, 5
-  %24 = load i32, ptr %4, align 4
-  %25 = sext i32 %24 to i64
-  %26 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %25
-  store i32 %23, ptr %26, align 4
-  br label %27
+  %23 = sext i32 %22 to i64
+  %24 = getelementptr inbounds [100 x i32], ptr %1, i64 0, i64 %23
+  %25 = load i32, ptr %24, align 4
+  %26 = add nsw i32 %25, 5
+  %27 = load i32, ptr %4, align 4
+  %28 = sext i32 %27 to i64
+  %29 = getelementptr inbounds [100 x i32], ptr %2, i64 0, i64 %28
+  store i32 %26, ptr %29, align 4
+  br label %30
 
-27:                                               ; preds = %21
-  %28 = load i32, ptr %4, align 4
-  %29 = add nsw i32 %28, 2
-  store i32 %29, ptr %4, align 4
+30:                                               ; preds = %21
+  %31 = load i32, ptr %4, align 4
+  %32 = add nsw i32 %31, 2
+  store i32 %32, ptr %4, align 4
   br label %18, !llvm.loop !16
 
-30:                                               ; preds = %18
+33:                                               ; preds = %18
   ret void
 }
 

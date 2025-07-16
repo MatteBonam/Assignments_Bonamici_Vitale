@@ -7,6 +7,7 @@
 using namespace llvm;
 
 namespace {
+  // function that returns the nearest power of 2 for a given number
   int nearestPowerOfTwo(int n) {
     if (n == 0) return 0;
     int lowerPower = 1 << (int)log2(n); 
@@ -58,8 +59,8 @@ namespace {
         // 2^4 - 2^0 = 15
         I.replaceAllUsesWith(add); 
       } else {
-        // tipo 48 (log2(48) = 5.5 -> 6) ==> 64 - 16
-        // (operand << p) - (operand << q)
+        // tipo 15 (log2(15) = 3,.. -> 4) ==> 15 - 16
+        // (operand << p) + (operand << q)
         Instruction *sub;
         Instruction *shiftP = BinaryOperator::CreateShl(operand, ConstantInt::get(operand->getType(), p), "shiftP");
         shiftP->insertAfter(&I);      
